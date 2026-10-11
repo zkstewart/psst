@@ -11,4 +11,31 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-### To be populated by Claude
+import os, sys
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pbs import q, load_template, finalise_job
+
+def annotable_generate(args):
+    '''
+    Generates (and optionally submits) a PBS job script which runs an MMseqs2
+    search and then produces an annotation table from its results.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "annotable generate" arguments.
+    '''
+    body = load_template("mms2_table_generation.sh").format(
+        mmseqsDir=q(args.mmseqsDir),
+        varScriptDir=q(args.varScriptDir),
+        query=q(args.query),
+        databaseTag=q(args.databaseTag),
+        database=q(args.database),
+        idmappingFile=q(args.idmappingFile),
+        oboFile=q(args.oboFile),
+        cpus=args.cpus,
+        numHits=args.numHits,
+        iterations=args.iterations,
+        outputPrefix=q(args.outputPrefix),
+        tmpDir=q(args.tmpDir)
+    )
+    finalise_job(args, body)
