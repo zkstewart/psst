@@ -41,7 +41,7 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, \
+from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
@@ -488,6 +488,12 @@ def main():
                                   help="""Optionally, specify the location of the reference haplotype 2
                                   FASTA file; default == '%(default)s'""",
                                   default=REFERENCE_HAP2_FASTA)
+    asscaffoldparser.add_argument("--paf2dotplot", dest="paf2dotplotDir",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify the directory containing paf2dotplot.r, used to
+                                  make dotplots of the scaffolded haplotypes; default == '%(default)s'""",
+                                  default=PAF2DOTPLOT_DIR)
     add_preset_arguments(asscaffoldparser)
     add_varscripts_argument(asscaffoldparser)
     add_pbs_arguments(asscaffoldparser, jobName="scaffolding",

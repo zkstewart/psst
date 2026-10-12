@@ -65,6 +65,7 @@ def assembly_scaffolding(args):
     '''
     finalise_job(args, "run_scaffolding_pipeline.sh", {
         "varScriptDir": args.varScriptDir,
+        "paf2dotplotDir": args.paf2dotplotDir,
         "refHap1": args.refHap1,
         "refHap2": args.refHap2,
         "cpus": args.cpus,

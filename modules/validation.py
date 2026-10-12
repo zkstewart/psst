@@ -281,6 +281,7 @@ def validate_as_scaffolding(args):
     validate_program_dir(args, "varScriptDir", os.path.join("assembly", "haplotype_scaffolding_pipeline.py"), "--varscripts")
     validate_input_file(args, "refHap1", "--refhap1", "Reference haplotype 1 FASTA file")
     validate_input_file(args, "refHap2", "--refhap2", "Reference haplotype 2 FASTA file")
+    validate_program_dir(args, "paf2dotplotDir", "paf2dotplot.r", "--paf2dotplot")
     if args.outputDir == "":
         raise ValueError("--outdir must be given a non-empty value")
 

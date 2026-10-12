@@ -6,7 +6,8 @@
         "compleasm_dir": "/home/stewarz2/various_programs/compleasm_kit",
         "dorado_dir": "/home/stewarz2/various_programs/dorado/dorado-1.3.0-linux-x64",
         "basespace_dir": "/home/stewarz2/various_programs/basespace",
-        "cdhit_dir": "/home/stewarz2/various_programs/cdhit-4.8.1"
+        "cdhit_dir": "/home/stewarz2/various_programs/cdhit-4.8.1",
+        "paf2dotplot_dir": "/home/stewarz2/various_programs/paf2dotplot"
     },
     "databases": {
         "refseq_plant_fasta": "/home/stewarz2/various_programs/refseq_db/refseq_plant.protein.faa",

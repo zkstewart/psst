@@ -28,6 +28,7 @@ COMPLEASM_DIR = CONFIG["programs"]["compleasm_dir"]
 DORADO_DIR = CONFIG["programs"]["dorado_dir"]
 BASESPACE_DIR = CONFIG["programs"]["basespace_dir"]
 CDHIT_DIR = CONFIG["programs"]["cdhit_dir"]
+PAF2DOTPLOT_DIR = CONFIG["programs"]["paf2dotplot_dir"]
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = CONFIG["databases"]["refseq_plant_fasta"]
