@@ -19,7 +19,7 @@
 
 import os, argparse, sys
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.realpath(__file__))) # realpath allows running via a symlink
 from modules.validation import \
     validate_as, \
         validate_as_hifiasm, validate_as_revcomp, validate_as_scaffolding, \
@@ -37,7 +37,7 @@ from modules.basecalling import basecalling_dorado
 from modules.blast import blast_run_mmseqs2
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
-    BUSK_HAP1_FASTA, BUSK_HAP2_FASTA
+    REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
 
 # Argument conventions:
@@ -378,7 +378,7 @@ def main():
                                  action=UserSet,
                                  help="""Optionally, specify the location of the reference genome FASTA file;
                                  default == '%(default)s'""",
-                                 default=BUSK_HAP1_FASTA)
+                                 default=REFERENCE_HAP1_FASTA)
     add_preset_arguments(asrevcompparser)
     add_varscripts_argument(asrevcompparser)
     add_pbs_arguments(asrevcompparser, jobName="revcomp",
@@ -395,13 +395,13 @@ def main():
                                   action=UserSet,
                                   help="""Optionally, specify the location of the reference haplotype 1
                                   FASTA file; default == '%(default)s'""",
-                                  default=BUSK_HAP1_FASTA)
+                                  default=REFERENCE_HAP1_FASTA)
     asscaffoldparser.add_argument("--refhap2", dest="refHap2",
                                   required=False,
                                   action=UserSet,
                                   help="""Optionally, specify the location of the reference haplotype 2
                                   FASTA file; default == '%(default)s'""",
-                                  default=BUSK_HAP2_FASTA)
+                                  default=REFERENCE_HAP2_FASTA)
     add_preset_arguments(asscaffoldparser)
     add_varscripts_argument(asscaffoldparser)
     add_pbs_arguments(asscaffoldparser, jobName="scaffolding",

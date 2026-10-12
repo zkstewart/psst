@@ -13,22 +13,26 @@
 
 import os
 
+from .config import CONFIG
+
 # Location of job script templates within this repository
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
 
+# Locations below are read from my_config.json or default_config.json (see config.py)
+
 # Program locations on the HPC
-MMSEQS_DIR = "/home/stewarz2/various_programs/mmseqs/bin"
-VARSCRIPT_DIR = "/home/stewarz2/scripts/Various_scripts"
-GENSCRIPT_DIR = "/home/stewarz2/scripts/Genome_analysis_scripts"
-COMPLEASM_DIR = "/home/stewarz2/various_programs/compleasm_kit"
-DORADO_DIR = "/home/stewarz2/various_programs/dorado/dorado-1.3.0-linux-x64"
+MMSEQS_DIR = CONFIG["programs"]["mmseqs_dir"]
+VARSCRIPT_DIR = CONFIG["programs"]["various_scripts_dir"]
+GENSCRIPT_DIR = CONFIG["programs"]["genome_analysis_scripts_dir"]
+COMPLEASM_DIR = CONFIG["programs"]["compleasm_dir"]
+DORADO_DIR = CONFIG["programs"]["dorado_dir"]
 
 # Database locations on the HPC
-REFSEQ_PLANT_FASTA = "/home/stewarz2/various_programs/refseq_db/refseq_plant.protein.faa"
-UNIREF90_FASTA = "/home/stewarz2/various_programs/uniref_db/uniref90.fasta"
-IDMAPPING_FILE = "/home/stewarz2/various_programs/uniref_db/idmapping_selected.tab"
-OBO_FILE = "/home/stewarz2/various_programs/uniref_db/go.obo"
+REFSEQ_PLANT_FASTA = CONFIG["databases"]["refseq_plant_fasta"]
+UNIREF90_FASTA = CONFIG["databases"]["uniref90_fasta"]
+IDMAPPING_FILE = CONFIG["databases"]["uniref_idmapping_file"]
+OBO_FILE = CONFIG["databases"]["go_obo_file"]
 
 # Reference genome locations on the HPC
-BUSK_HAP1_FASTA = "/work/ePGL/genomes/citrus/bundaberg/Busk/Busk.hap1.fasta"
-BUSK_HAP2_FASTA = "/work/ePGL/genomes/citrus/bundaberg/Busk/Busk.hap2.fasta"
+REFERENCE_HAP1_FASTA = CONFIG["references"]["reference_hap1_fasta"]
+REFERENCE_HAP2_FASTA = CONFIG["references"]["reference_hap2_fasta"]

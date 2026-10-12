@@ -14,16 +14,13 @@
 import os, re, shutil
 
 from .basecalling import DORADO_SCRIPTS
+from .config import CONFIG, RPID_REGEX
 
 # Note: only values the user explicitly specified (recorded in args.userSet by the
 # UserSet argparse action) are checked to exist; default locations are used unchecked.
 
 MAX_WALLTIME_HOURS = 48
-RPID_SHORTCUTS = {
-    "GNGO": "XNOEYW5200",
-    "SPC": "ULJQSK8720",
-    "PHD": "HLCVGA3552"
-}
+RPID_SHORTCUTS = CONFIG["rpid_shortcuts"]
 
 class DirectoryNotFoundError(Exception):
     pass
@@ -59,7 +56,7 @@ def validate_rpid(rpid):
     rpid = rpid.upper()
     if rpid in RPID_SHORTCUTS:
         return RPID_SHORTCUTS[rpid]
-    if re.match(r"^[A-Z]{6}\d{4}$", rpid) == None:
+    if RPID_REGEX.match(rpid) == None:
         raise FormatError(f"--rpid '{rpid}' must be 6 letters followed by 4 numbers, or one of " +
                           ", ".join(RPID_SHORTCUTS))
     return rpid
