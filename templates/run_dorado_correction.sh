@@ -17,7 +17,8 @@ VARSCRIPTDIR=@@varScriptDir@@
 FQDIR=fastq
 OUTDIR=fastq_corrected
 
-# Specify the job name prefix and resources of the step 1 (CPU) and step 2 (GPU) correction jobs
+# Specify the RPID, job name prefix and resources of the step 1 (CPU) and step 2 (GPU) correction jobs
+RPID=@@rpid@@
 JOBPREFIX=@@jobPrefix@@
 S1CPUS=@@s1Cpus@@
 S1MEM=@@s1Mem@@
@@ -37,7 +38,7 @@ mkdir -p ${OUTDIR}
 python ${VARSCRIPTDIR}/basecalling/dorado_correct_pipeline.py -f ${FQDIR}/${FQFILE} \
     -n ${NUMBLOCKS} -o ${OUTDIR} \
     --dorado ${DORADODIR}/bin/dorado \
-    --jobPrefix ${JOBPREFIX} \
+    --rpid ${RPID} --jobPrefix ${JOBPREFIX} \
     --cpuCPU ${S1CPUS} --memCPU ${S1MEM} --walltimeCPU ${S1WALLTIME} \
     --cpuGPU ${S2CPUS} --memGPU ${S2MEM} --walltimeGPU ${S2WALLTIME} | tee ${OUTDIR}/dorado_correct_pipeline.log
 

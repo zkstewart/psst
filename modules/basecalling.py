@@ -57,6 +57,7 @@ def basecalling_dorado(args):
             "minReadLen": args.minReadLen,
             "doradoDir": args.doradoDir,
             "varScriptDir": args.varScriptDir,
+            "rpid": args.rpid,
             "jobPrefix": args.jobName,
             "s1Cpus": args.s1Cpus, "s1Mem": args.s1Mem, "s1Walltime": args.s1Walltime,
             "s2Cpus": args.s2Cpus, "s2Mem": args.s2Mem, "s2Walltime": args.s2Walltime
