@@ -11,10 +11,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import os, shlex, subprocess, sys
+import os, re, shlex, subprocess
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from locations import TEMPLATE_DIR
+from .locations import TEMPLATE_DIR
+
+# Template placeholders look like '@@fieldName@@'; this syntax is chosen to never clash
+# with bash syntax, and an unfilled placeholder remains a valid (if meaningless) bash word
+PLACEHOLDER_REGEX = re.compile(r"@@([A-Za-z_][A-Za-z0-9_]*)@@")
 
 def q(value):
     '''
@@ -33,7 +36,7 @@ def load_template(templateName):
     Parameters:
         templateName -- a string of the template file name within the templates directory.
     Returns:
-        template -- a string of the template contents for use with str.format().
+        template -- a string of the template contents containing '@@field@@' placeholders.
     '''
     templateFile = os.path.join(TEMPLATE_DIR, templateName)
     if not os.path.isfile(templateFile):
@@ -41,35 +44,41 @@ def load_template(templateName):
     with open(templateFile, "r") as fileIn:
         return fileIn.read()
 
-class PlaceholderDict(dict):
+def fill_template(templateName, values, quote=True):
     '''
-    A dict for use with str.format_map() which leaves any keys it does not contain
-    as '{key}' placeholders in the formatted string, recording which were missed.
-    '''
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.missing = []
+    Fills a template's '@@field@@' placeholders with values. Values that are None are
+    intentionally left as placeholders for the user to fill in later.
     
-    def __missing__(self, key):
-        if key not in self.missing:
-            self.missing.append(key)
-        return "{" + key + "}"
-
-def fill_template(templateName, values):
-    '''
-    Fills a template with values, shell-quoting each one. Any value that is None, or
-    any template field absent from values, is left as a '{field}' placeholder.
+    Every template field must be a key in values, and every key in values must be a
+    template field; this catches typos between templates and the modules filling them.
     
     Parameters:
         templateName -- a string of the template file name within the templates directory.
         values -- a dict of template field names to values (or None).
+        quote -- OPTIONAL; a boolean indicating whether to shell-quote values; default == True.
     Returns:
         filled -- a string of the template with values filled in.
         missing -- a list of template field names left as placeholders.
     '''
-    placeholders = PlaceholderDict({ k: q(v) for k, v in values.items() if v != None })
-    filled = load_template(templateName).format_map(placeholders)
-    return filled, placeholders.missing
+    template = load_template(templateName)
+    
+    # Check that the template and values agree on field names
+    fields = list(dict.fromkeys(PLACEHOLDER_REGEX.findall(template))) # ordered, unique
+    notGiven = [ f for f in fields if f not in values ]
+    notUsed = [ k for k in values if k not in fields ]
+    if notGiven != [] or notUsed != []:
+        raise KeyError(f"Template '{templateName}' fields do not match the values given; " +
+                       f"fields without values = {notGiven}, values without fields = {notUsed}")
+    
+    # Fill in the template
+    def substitute(match):
+        value = values[match.group(1)]
+        if value == None:
+            return match.group(0)
+        return q(value) if quote else str(value)
+    filled = PLACEHOLDER_REGEX.sub(substitute, template)
+    missing = [ f for f in fields if values[f] == None ]
+    return filled, missing
 
 def format_pbs_header(args, afterok=None, afternotok=None):
     '''
@@ -93,14 +102,15 @@ def format_pbs_header(args, afterok=None, afternotok=None):
     else:
         dependLine = ""
 
-    return load_template("pbs_header.sh").format(
-        jobName=args.jobName,
-        walltime=args.walltime,
-        mem=args.mem,
-        cpus=args.cpus,
-        rpid=args.rpid,
-        dependLine=dependLine
-    )
+    header, _ = fill_template("pbs_header.sh", {
+        "jobName": args.jobName,
+        "walltime": args.walltime,
+        "mem": args.mem,
+        "cpus": args.cpus,
+        "rpid": args.rpid,
+        "dependLine": dependLine
+    }, quote=False) # values are validated to be shell-safe; dependLine must not be quoted
+    return header
 
 def write_job_script(args, body):
     '''

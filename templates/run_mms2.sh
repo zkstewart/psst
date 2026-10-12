@@ -1,39 +1,39 @@
 ####
 
 # Specify program locations
-MMSEQDIR={mmseqsDir}
-VARSCRIPTDIR={varScriptDir}
+MMSEQDIR=@@mmseqsDir@@
+VARSCRIPTDIR=@@varScriptDir@@
 
 # Specify query FASTA location
-QUERY={query}
+QUERY=@@query@@
 
 # Specify target FASTA location
-DATABASE={database}
+DATABASE=@@database@@
 
 # Specify output details
-OUTPREFIX={outputPrefix}
+OUTPREFIX=@@outputPrefix@@
 
 # Specify tmp directory
-MMS2TMP={tmpDir}
+MMS2TMP=@@tmpDir@@
 
 # Specify program parameters
-CPUS={cpus}
-NUM_ITERS={iterations}
-SENS={sensitivity}
-SEARCHTYPE={searchType}
+CPUS=@@cpus@@
+NUM_ITERS=@@iterations@@
+SENS=@@sensitivity@@
+SEARCHTYPE=@@searchType@@
 
 ####
 
 # Step 1: Add MMSEQS to path
-export PATH=$MMSEQDIR/:$PATH
+export PATH=${MMSEQDIR}/:${PATH}
 
 # Step 2: Run MMseqs2
-python $VARSCRIPTDIR/run_mmseqs2.py -st $SEARCHTYPE \
-    -q $QUERY -t $DATABASE \
-    -o $OUTPREFIX \
-    -m $MMSEQDIR \
-    -c $CPUS \
-    -n $NUM_ITERS -s $SENS \
+python ${VARSCRIPTDIR}/run_mmseqs2.py -st ${SEARCHTYPE} \
+    -q ${QUERY} -t ${DATABASE} \
+    -o ${OUTPREFIX} \
+    -m ${MMSEQDIR} \
+    -c ${CPUS} \
+    -n ${NUM_ITERS} -s ${SENS} \
     --resume \
     --blast_sort \
-    --tmpDir $MMS2TMP
+    --tmpDir ${MMS2TMP}

@@ -11,15 +11,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import os, re, shutil, sys
+import os, re, shutil
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from locations import MMSEQS_DIR, VARSCRIPT_DIR, REFSEQ_PLANT_FASTA, UNIREF90_FASTA, \
-    IDMAPPING_FILE, OBO_FILE
-
-# Note: arguments with a default location are given default=None in the parser so that
-# validation can tell whether the user specified a value. User-specified locations are
-# checked to exist; default locations are substituted in without any checking.
+# Note: only values the user explicitly specified (recorded in args.userSet by the
+# UserSet argparse action) are checked to exist; default locations are used unchecked.
 
 MAX_WALLTIME_HOURS = 48
 RPID_SHORTCUTS = {
@@ -67,23 +62,41 @@ def validate_rpid(rpid):
                           ", ".join(RPID_SHORTCUTS))
     return rpid
 
-def validate_input_file(fileName, flag, description, default=None):
+def validate_input_file(args, dest, flag, description):
     '''
+    Checks that a user-specified file exists and makes its path absolute. Values not
+    specified by the user (i.e., defaults or None placeholders) are left unchanged.
+    
     Parameters:
-        fileName -- a string indicating the location of a file, or None if not specified.
+        args -- an argparse.Namespace containing args.userSet and the dest attribute.
+        dest -- a string of the argparse dest holding the file location.
         flag -- a string of the argument flag used to specify the file.
         description -- a string describing the file for error messages.
-        default -- OPTIONAL; a string of the default file location to use, without
-                   checking, if fileName is None.
-    Returns:
-        fileName -- the absolute path of the file, or default if not specified.
     '''
-    if fileName == None:
-        return default
-    fileName = os.path.abspath(fileName)
+    if dest not in args.userSet:
+        return
+    fileName = os.path.abspath(getattr(args, dest))
     if not os.path.isfile(fileName):
         raise FileNotFoundError(f"{description} ({flag} {fileName}) does not exist!")
-    return fileName
+    setattr(args, dest, fileName)
+
+def validate_program_dir(args, dest, requiredFile, flag):
+    '''
+    Checks that a user-specified program directory contains a required file and makes
+    its path absolute. Values not specified by the user are left unchanged.
+    
+    Parameters:
+        args -- an argparse.Namespace containing args.userSet and the dest attribute.
+        dest -- a string of the argparse dest holding the directory location.
+        requiredFile -- a string of a file path, relative to the directory, which must exist.
+        flag -- a string of the argument flag used to specify the directory.
+    '''
+    if dest not in args.userSet:
+        return
+    dirName = os.path.abspath(getattr(args, dest))
+    if not os.path.isfile(os.path.join(dirName, requiredFile)):
+        raise FileNotFoundError(f"{requiredFile} not found in {flag} {dirName}")
+    setattr(args, dest, dirName)
 
 def validate_output_prefix(outputPrefix):
     '''
@@ -102,48 +115,41 @@ def validate_output_prefix(outputPrefix):
         raise DirectoryNotFoundError(f"Output prefix (-o {outputPrefix}) is in a directory that does not exist!")
     return outputPrefix
 
-def validate_program_dir(dirName, requiredFile, flag, default=None):
-    '''
-    Parameters:
-        dirName -- a string indicating the location of a program directory, or None
-                   if not specified.
-        requiredFile -- a string of a file path, relative to dirName, which must exist.
-        flag -- a string of the argument flag used to specify the directory.
-        default -- OPTIONAL; a string of the default directory location to use, without
-                   checking, if dirName is None.
-    Returns:
-        dirName -- the absolute path of the directory, or default if not specified.
-    '''
-    if dirName == None:
-        return default
-    dirName = os.path.abspath(dirName)
-    if not os.path.isfile(os.path.join(dirName, requiredFile)):
-        raise FileNotFoundError(f"{requiredFile} not found in {flag} {dirName}")
-    return dirName
-
 def validate_mmseqs2(args):
     '''
-    Validation for MMseqs2 and Various_scripts locations shared by any job that
-    runs Various_scripts/run_mmseqs2.py.
+    Validation for arguments shared by any job that runs Various_scripts/run_mmseqs2.py
+    (i.e., those added by add_mmseqs2_arguments() in psst.py).
     '''
-    args.mmseqsDir = validate_program_dir(args.mmseqsDir, "mmseqs", "--mmseqs", default=MMSEQS_DIR)
-
-    args.varScriptDir = validate_program_dir(args.varScriptDir, "run_mmseqs2.py", "--varscripts", default=VARSCRIPT_DIR)
-
-    if args.iterations != None and args.iterations < 1:
+    # Validate input files
+    validate_input_file(args, "query", "-q", "Query FASTA file")
+    validate_input_file(args, "database", "-d", "Database FASTA file")
+    
+    # Validate program locations
+    validate_program_dir(args, "mmseqsDir", "mmseqs", "--mmseqs")
+    validate_program_dir(args, "varScriptDir", "run_mmseqs2.py", "--varscripts")
+    
+    # Validate parameters
+    if args.iterations < 1:
         raise ValueError("--iterations must be >= 1")
+    
+    # Validate output locations
+    args.outputPrefix = validate_output_prefix(args.outputPrefix)
+    if args.tmpDir == None and args.outputPrefix != None:
+        args.tmpDir = f"{args.outputPrefix}_tmp"
+    if args.tmpDir != None:
+        args.tmpDir = os.path.abspath(args.tmpDir)
 
-def validate_pbs(args, scriptSuffix):
+def validate_pbs(args):
     '''
-    Validation for PBS arguments common to all job scripts. Should be called at the
-    end of each job's validation function since the default script name is derived
-    from args.outputPrefix.
-
+    Validation for PBS arguments common to all job scripts. Called once by psst.py
+    after all mode-specific validation, since the default script name is derived
+    from the validated args.outputPrefix.
+    
     Parameters:
-        args -- an argparse.Namespace containing PBS arguments and args.outputPrefix.
-        scriptSuffix -- a string to name the job script with when deriving a default
-                        script file name; either '<outputPrefix>.<scriptSuffix>.sh' or
-                        '<scriptSuffix>.sh' if args.outputPrefix is None.
+        args -- an argparse.Namespace containing PBS arguments, args.outputPrefix, and
+                args.scriptSuffix (set by each leaf parser) to name the script with as
+                either '<outputPrefix>.<scriptSuffix>.sh' or '<scriptSuffix>.sh' if
+                args.outputPrefix is None.
     '''
     # Validate resource requests
     if args.cpus < 1:
@@ -179,9 +185,9 @@ def validate_pbs(args, scriptSuffix):
     # Validate script file name
     if args.scriptFile == None:
         if args.outputPrefix != None:
-            args.scriptFile = f"{args.outputPrefix}.{scriptSuffix}.sh"
+            args.scriptFile = f"{args.outputPrefix}.{args.scriptSuffix}.sh"
         else:
-            args.scriptFile = f"{scriptSuffix}.sh"
+            args.scriptFile = f"{args.scriptSuffix}.sh"
     args.scriptFile = os.path.abspath(args.scriptFile)
     if os.path.exists(args.scriptFile):
         raise FileExistsError(f"Job script (--script {args.scriptFile}) already exists!")
@@ -198,28 +204,16 @@ def validate_at_generate(args):
     '''
     Validation for arguments used in "annotable generate" mode.
     '''
-    # Validate input files
-    args.query = validate_input_file(args.query, "-q", "Query FASTA file")
-    args.database = validate_input_file(args.database, "-d", "Database FASTA file", default=REFSEQ_PLANT_FASTA)
-    args.idmappingFile = validate_input_file(args.idmappingFile, "--idmapping", "idmapping file", default=IDMAPPING_FILE)
-    args.oboFile = validate_input_file(args.oboFile, "--obo", "GO .obo file", default=OBO_FILE)
-
-    # Validate program locations and parameters
-    if args.varScriptDir != None:
-        validate_program_dir(args.varScriptDir, os.path.join("annotation_table", "generate_annotation_table.py"), "--varscripts")
     validate_mmseqs2(args)
-
+    
+    # Validate annotation files
+    validate_input_file(args, "idmappingFile", "--idmapping", "idmapping file")
+    validate_input_file(args, "oboFile", "--obo", "GO .obo file")
+    
+    # Validate program locations and parameters
+    validate_program_dir(args, "varScriptDir", os.path.join("annotation_table", "generate_annotation_table.py"), "--varscripts")
     if args.numHits < 1:
         raise ValueError("--numhits must be >= 1")
-
-    # Validate output locations
-    args.outputPrefix = validate_output_prefix(args.outputPrefix)
-    if args.tmpDir == None and args.outputPrefix != None:
-        args.tmpDir = f"{args.outputPrefix}_tmp"
-    if args.tmpDir != None:
-        args.tmpDir = os.path.abspath(args.tmpDir)
-
-    validate_pbs(args, "annotable")
 
 def validate_b(args):
     '''
@@ -237,18 +231,4 @@ def validate_b_run_mmseqs2(args):
     '''
     Validation for arguments used in "blast run mmseqs2" mode.
     '''
-    # Validate input files
-    args.query = validate_input_file(args.query, "-q", "Query FASTA file")
-    args.database = validate_input_file(args.database, "-d", "Database FASTA file", default=UNIREF90_FASTA)
-
-    # Validate program locations and parameters
     validate_mmseqs2(args)
-
-    # Validate output locations
-    args.outputPrefix = validate_output_prefix(args.outputPrefix)
-    if args.tmpDir == None and args.outputPrefix != None:
-        args.tmpDir = f"{args.outputPrefix}_tmp"
-    if args.tmpDir != None:
-        args.tmpDir = os.path.abspath(args.tmpDir)
-
-    validate_pbs(args, "mms2")
