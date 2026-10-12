@@ -28,11 +28,14 @@ from modules.validation import \
     validate_b, \
         validate_b_run, \
             validate_b_run_mmseqs2, \
-    validate_pbs, RPID_SHORTCUTS
+    validate_bc, \
+        validate_bc_dorado, \
+    validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
+from modules.basecalling import basecalling_dorado
 from modules.blast import blast_run_mmseqs2
-from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, \
+from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     BUSK_HAP1_FASTA, BUSK_HAP2_FASTA
 from _version import __version__
@@ -45,7 +48,10 @@ from _version import __version__
 #   so default locations on the HPC are never checked.
 # - Arguments without a sensible default should default to None, which leaves an
 #   '@@field@@' placeholder in the job script for the user to fill in.
-# - Each leaf parser must set_defaults(func=<job function>, scriptSuffix=<str>).
+# - Each leaf parser must set_defaults(func=<job function>). Single-job modes use
+#   add_pbs_arguments() and must also set_defaults(scriptSuffix=<str>); multi-job modes
+#   use add_pbs_submission_arguments() with add_pbs_resource_arguments() per job, and
+#   validate their own job resources and script locations.
 
 class UserSet(argparse.Action):
     '''
@@ -58,57 +64,64 @@ class UserSet(argparse.Action):
             namespace.userSet = set()
         namespace.userSet.add(self.dest)
 
-def add_pbs_arguments(parser, jobName, walltime, mem, cpus):
+def add_pbs_resource_arguments(parser, walltime, mem, cpus, step=None, title=None):
     '''
-    Adds PBS job arguments to a leaf subparser with job-specific default values.
-
+    Adds PBS resource arguments for one job with job-specific default values.
+    
     Parameters:
-        parser -- an argparse.ArgumentParser to add arguments to.
-        jobName -- a string of the default PBS job name.
+        parser -- an argparse.ArgumentParser (or argument group) to add arguments to.
         walltime -- a string of the default walltime in 'HH:MM:SS' format.
         mem -- a string of the default memory request (e.g., '70G').
         cpus -- an int of the default number of CPUs to request.
+        step -- OPTIONAL; a string naming the job within a multi-job mode (e.g., 'p1'),
+                giving arguments like '--p1-cpus' with dest 'p1Cpus'; default == None,
+                giving arguments like '--cpus' with dest 'cpus'.
+        title -- OPTIONAL; a string describing the job for an argument group heading;
+                 if given, arguments are added to a new group within parser.
     '''
-    g = parser.add_argument_group("PBS job arguments")
-    g.add_argument("--cpus", dest="cpus",
-                   required=False,
-                   type=int,
-                   help="""Optionally, specify the number of CPUs to request;
-                   default == %(default)s""",
-                   default=cpus)
-    g.add_argument("--mem", dest="mem",
-                   required=False,
-                   help="""Optionally, specify the memory to request;
-                   default == '%(default)s'""",
-                   default=mem)
-    g.add_argument("--walltime", dest="walltime",
-                   required=False,
-                   help="""Optionally, specify the walltime to request in 'H', 'H:MM',
-                   or 'H:MM:SS' format (max 48 hours); default == '%(default)s'""",
-                   default=walltime)
-    g.add_argument("--name", dest="jobName",
-                   required=False,
-                   help="""Optionally, specify the PBS job name;
-                   default == '%(default)s'""",
-                   default=jobName)
+    if title != None:
+        parser = parser.add_argument_group(title)
+    flag = (lambda name: f"--{step}-{name}") if step != None else (lambda name: f"--{name}")
+    dest = (lambda name: f"{step}{name.capitalize()}") if step != None else (lambda name: name)
+    
+    parser.add_argument(flag("cpus"), dest=dest("cpus"),
+                        required=False,
+                        type=int,
+                        help="""Optionally, specify the number of CPUs to request;
+                        default == %(default)s""",
+                        default=cpus)
+    parser.add_argument(flag("mem"), dest=dest("mem"),
+                        required=False,
+                        help="""Optionally, specify the memory to request;
+                        default == '%(default)s'""",
+                        default=mem)
+    parser.add_argument(flag("walltime"), dest=dest("walltime"),
+                        required=False,
+                        help="""Optionally, specify the walltime to request in 'H', 'H:MM',
+                        or 'H:MM:SS' format (max 48 hours); default == '%(default)s'""",
+                        default=walltime)
+
+def add_pbs_submission_arguments(parser):
+    '''
+    Adds PBS submission arguments common to all modes to a leaf subparser.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+    '''
+    parser.set_defaults(singleJob=False) # add_pbs_arguments() overrides this
+    g = parser.add_argument_group("PBS submission arguments")
     shortcuts = ", ".join(f"{k}={v}" for k, v in RPID_SHORTCUTS.items())
     g.add_argument("--rpid", dest="rpid",
                    required=True,
                    help=f"""Research Project ID (RPID) to attach to the job via '#PBS -P';
                    accepts a full RPID or a shortcut ({shortcuts})""")
-    g.add_argument("--script", dest="scriptFile",
-                   required=False,
-                   help="""Optionally, specify where to write the job script;
-                   default == '<outprefix>.<job>.sh' if -o is given, otherwise
-                   '<job>.sh' in the current directory""",
-                   default=None)
     g.add_argument("--qsub", dest="qsub",
                    required=False,
                    action="store_true",
                    help="""Optionally, submit the job script with qsub after
                    writing it""",
                    default=False)
-
+    
     d = g.add_mutually_exclusive_group()
     d.add_argument("--afterok", dest="afterok",
                    required=False,
@@ -122,6 +135,34 @@ def add_pbs_arguments(parser, jobName, walltime, mem, cpus):
                    help="""Optionally, specify one or more job IDs which must fail
                    before this job starts""",
                    default=None)
+
+def add_pbs_arguments(parser, jobName, walltime, mem, cpus):
+    '''
+    Adds PBS job and submission arguments to the leaf subparser of a single-job mode,
+    with job-specific default values.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+        jobName -- a string of the default PBS job name.
+        walltime -- a string of the default walltime in 'HH:MM:SS' format.
+        mem -- a string of the default memory request (e.g., '70G').
+        cpus -- an int of the default number of CPUs to request.
+    '''
+    g = parser.add_argument_group("PBS job arguments")
+    add_pbs_resource_arguments(g, walltime, mem, cpus)
+    g.add_argument("--name", dest="jobName",
+                   required=False,
+                   help="""Optionally, specify the PBS job name;
+                   default == '%(default)s'""",
+                   default=jobName)
+    g.add_argument("--script", dest="scriptFile",
+                   required=False,
+                   help="""Optionally, specify where to write the job script;
+                   default == '<outprefix>.<job>.sh' if -o is given, otherwise
+                   '<job>.sh' in the current directory""",
+                   default=None)
+    add_pbs_submission_arguments(parser)
+    parser.set_defaults(singleJob=True)
 
 def add_mmseqs2_arguments(parser, database):
     '''
@@ -366,6 +407,87 @@ def main():
     add_pbs_arguments(asscaffoldparser, jobName="scaffolding",
                       walltime="12:00:00", mem="70G", cpus=8)
     
+    # Basecalling subparser
+    bcparser = subparsers.add_parser("basecalling",
+                                     parents=[p],
+                                     add_help=False,
+                                     help="Nanopore basecalling jobs")
+    
+    subBasecallingParsers = bcparser.add_subparsers(dest="basecallingMode",
+                                                    required=True)
+    
+    # Basecalling > dorado mode
+    bcdoradoparser = subBasecallingParsers.add_parser("dorado",
+                                                      parents=[p],
+                                                      add_help=False,
+                                                      help="""Basecall and correct nanopore reads with dorado
+                                                      as a chain of jobs""")
+    bcdoradoparser.set_defaults(func=basecalling_dorado)
+    bcdoradoparser.add_argument("-p", "--prefix", dest="prefix",
+                                required=False,
+                                help="""Optionally, specify the prefix for output files (e.g., a sample ID);
+                                default == left as a placeholder""",
+                                default=None)
+    bcdoradoparser.add_argument("--workdir", dest="workDir",
+                                required=False,
+                                help="""Optionally, specify the run directory containing the pod5
+                                directory, where job scripts will be laid out; default == '%(default)s'""",
+                                default=".")
+    bcdoradoparser.add_argument("--model", dest="model",
+                                required=False,
+                                help="""Optionally, specify the dorado basecalling model;
+                                default == '%(default)s'""",
+                                default="sup")
+    bcdoradoparser.add_argument("--minreadlen", dest="minReadLen",
+                                required=False,
+                                type=int,
+                                help="""Optionally, specify the minimum read length to keep before
+                                correction; default == %(default)s""",
+                                default=5000)
+    bcdoradoparser.add_argument("--concat-minimum", dest="concatMinimum",
+                                required=False,
+                                type=int,
+                                help="""Optionally, specify the minimum length of corrected reads
+                                to keep when concatenating; default == %(default)s""",
+                                default=5000)
+    bcdoradoparser.add_argument("--concat-multiline", dest="concatMultiline",
+                                required=False,
+                                type=int,
+                                help="""Optionally, specify the line length of the concatenated
+                                corrected reads FASTA; default == %(default)s""",
+                                default=60)
+    bcdoradoparser.add_argument("--gpuid", dest="gpuID",
+                                required=False,
+                                help="""Optionally, specify the GPU type to request for basecalling;
+                                default == '%(default)s'""",
+                                default="H100")
+    bcdoradoparser.add_argument("--name", dest="jobName",
+                                required=False,
+                                help="""Optionally, specify a prefix for job names (e.g., '<name>_p1');
+                                default == the value of -p, or 'dorado' if -p is not given""",
+                                default=None)
+    bcdoradoparser.add_argument("--dorado", dest="doradoDir",
+                                required=False,
+                                action=UserSet,
+                                help="""Optionally, specify the dorado directory containing bin/ and lib/;
+                                default == '%(default)s'""",
+                                default=DORADO_DIR)
+    add_varscripts_argument(bcdoradoparser)
+    add_genscripts_argument(bcdoradoparser)
+    add_pbs_resource_arguments(bcdoradoparser, step="p1", title="PBS resources: basecaller part 1 (GPU basecalling)",
+                               walltime="32:00:00", mem="35G", cpus=1)
+    add_pbs_resource_arguments(bcdoradoparser, step="p2", title="PBS resources: basecaller part 2 (BAM to FASTQ)",
+                               walltime="16:00:00", mem="60G", cpus=1)
+    add_pbs_resource_arguments(bcdoradoparser, step="corr", title="PBS resources: correction job submission",
+                               walltime="00:10:00", mem="10G", cpus=1)
+    add_pbs_resource_arguments(bcdoradoparser, step="s1", title="PBS resources: correction step 1 (CPU array)",
+                               walltime="32:00:00", mem="380G", cpus=22)
+    add_pbs_resource_arguments(bcdoradoparser, step="s2", title="PBS resources: correction step 2 (GPU array)",
+                               walltime="24:00:00", mem="30G", cpus=4)
+    add_pbs_resource_arguments(bcdoradoparser, step="concat", title="PBS resources: corrected read concatenation",
+                               walltime="03:00:00", mem="30G", cpus=1)
+    add_pbs_submission_arguments(bcdoradoparser)
+    
     # Blast subparser
     bparser = subparsers.add_parser("blast",
                                     parents=[p],
@@ -420,13 +542,19 @@ def main():
         print("## psst.py - Genome assembly handling ##")
         validate_as(args)
         asmain(args)
+    if args.mode == "basecalling":
+        print("## psst.py - Basecalling handling ##")
+        validate_bc(args)
+        bcmain(args)
     if args.mode == "blast":
         print("## psst.py - BLAST handling ##")
         validate_b(args)
         bmain(args)
 
-    # Validate PBS arguments and write (+/- submit) the job script
-    validate_pbs(args)
+    # Validate PBS arguments and write (+/- submit) the job script(s)
+    validate_pbs_submission(args)
+    if args.singleJob:
+        validate_pbs_job(args)
     args.func(args)
 
     # Print completion flag if we reach this point
@@ -449,6 +577,12 @@ def asmain(args):
     if args.assemblyMode == "scaffolding":
         print("## Haplotype scaffolding ##")
         validate_as_scaffolding(args)
+
+def bcmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.basecallingMode == "dorado":
+        print("## dorado basecalling and read correction ##")
+        validate_bc_dorado(args)
 
 def bmain(args):
     # Split into sub-mode-specific validation functions

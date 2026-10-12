@@ -21,6 +21,7 @@ MMSEQS_DIR = "/home/stewarz2/various_programs/mmseqs/bin"
 VARSCRIPT_DIR = "/home/stewarz2/scripts/Various_scripts"
 GENSCRIPT_DIR = "/home/stewarz2/scripts/Genome_analysis_scripts"
 COMPLEASM_DIR = "/home/stewarz2/various_programs/compleasm_kit"
+DORADO_DIR = "/home/stewarz2/various_programs/dorado/dorado-1.3.0-linux-x64"
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = "/home/stewarz2/various_programs/refseq_db/refseq_plant.protein.faa"

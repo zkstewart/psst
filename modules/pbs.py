@@ -80,75 +80,108 @@ def fill_template(templateName, values, quote=True):
     missing = [ f for f in fields if values[f] == None ]
     return filled, missing
 
-def format_pbs_header(args, afterok=None, afternotok=None):
+def format_pbs_header(jobName, walltime, mem, cpus, rpid, afterok=None, afternotok=None,
+                      gpus=None, gpuID=None):
     '''
     Parameters:
-        args -- an argparse.Namespace containing validated PBS arguments
-                (jobName, walltime, mem, cpus, rpid).
+        jobName -- a string of the PBS job name.
+        walltime -- a string of the walltime in 'HH:MM:SS' format.
+        mem -- a string of the memory request (e.g., '70G').
+        cpus -- an int of the number of CPUs to request.
+        rpid -- a string of the Research Project ID to attach to the job.
         afterok -- OPTIONAL; a list of job ID strings which must complete successfully
                    before this job can start.
         afternotok -- OPTIONAL; a list of job ID strings which must fail before this
                       job can start.
+        gpus -- OPTIONAL; an int of the number of GPUs to request.
+        gpuID -- OPTIONAL; a string of the GPU type to request (e.g., 'H100').
     Returns:
         header -- a string of the PBS directives and preamble for a job script.
     '''
     if afterok and afternotok:
         raise ValueError("afterok and afternotok dependencies are mutually exclusive")
-
+    
+    # Format optional directives
+    extraDirectives = ""
+    if gpus != None:
+        extraDirectives += f"\n#PBS -l ngpus={gpus}"
+    if gpuID != None:
+        extraDirectives += f"\n#PBS -l gpu_id={gpuID}"
     if afterok:
-        dependLine = "\n#PBS -W depend=afterok:" + ":".join(afterok)
+        extraDirectives += "\n#PBS -W depend=afterok:" + ":".join(afterok)
     elif afternotok:
-        dependLine = "\n#PBS -W depend=afternotok:" + ":".join(afternotok)
-    else:
-        dependLine = ""
-
+        extraDirectives += "\n#PBS -W depend=afternotok:" + ":".join(afternotok)
+    
     header, _ = fill_template("pbs_header.sh", {
-        "jobName": args.jobName,
-        "walltime": args.walltime,
-        "mem": args.mem,
-        "cpus": args.cpus,
-        "rpid": args.rpid,
-        "dependLine": dependLine
-    }, quote=False) # values are validated to be shell-safe; dependLine must not be quoted
+        "jobName": jobName,
+        "walltime": walltime,
+        "mem": mem,
+        "cpus": cpus,
+        "rpid": rpid,
+        "extraDirectives": extraDirectives
+    }, quote=False) # values are validated to be shell-safe; directives must not be quoted
     return header
 
-def write_job_script(args, body):
+def write_job_script(scriptFile, header, body):
     '''
     Writes a PBS job script consisting of the PBS header followed by the job body.
-
+    
     Parameters:
-        args -- an argparse.Namespace containing validated PBS arguments,
-                args.afterok and args.afternotok job dependencies, and
-                args.scriptFile indicating where to write the script.
+        scriptFile -- a string indicating where to write the script.
+        header -- a string of the PBS header as produced by format_pbs_header().
         body -- a string containing the job-specific script contents.
     '''
-    header = format_pbs_header(args, afterok=args.afterok, afternotok=args.afternotok)
-    with open(args.scriptFile, "w") as fileOut:
+    with open(scriptFile, "w") as fileOut:
         fileOut.write(header + body)
-    print(f"Job script written to '{args.scriptFile}'")
+    print(f"Job script written to '{scriptFile}'")
 
-def submit_job(scriptFile):
+def submit_job(scriptFile, afterok=None, cwd=None):
     '''
-    Submits a job script with qsub from the current working directory.
-
+    Submits a job script with qsub. The job's $PBS_O_WORKDIR is the directory qsub
+    is run from.
+    
     Parameters:
         scriptFile -- a string indicating the location of the job script to submit.
+        afterok -- OPTIONAL; a string of a job ID which must complete successfully
+                   before this job can start; overrides any dependency in the script.
+        cwd -- OPTIONAL; a string of the directory to run qsub from; default == the
+               current working directory.
     Returns:
         jobID -- a string of the job ID reported by qsub.
     '''
-    result = subprocess.run(["qsub", scriptFile], capture_output=True, text=True)
+    cmd = ["qsub"]
+    if afterok != None:
+        cmd += ["-W", f"depend=afterok:{afterok}"]
+    result = subprocess.run(cmd + [scriptFile], capture_output=True, text=True, cwd=cwd)
     if result.returncode != 0:
         raise RuntimeError(f"qsub failed with exit code {result.returncode}:\n{result.stderr}")
-
+    
     jobID = result.stdout.strip()
-    print(f"Job submitted as '{jobID}'")
+    print(f"Job '{os.path.basename(scriptFile)}' submitted as '{jobID}'")
     return jobID
+
+def check_placeholders(args, missing):
+    '''
+    Reports placeholders left in job scripts, raising an error if they would be
+    submitted with --qsub.
+    
+    Parameters:
+        args -- an argparse.Namespace containing args.qsub.
+        missing -- a list of template field names left as placeholders.
+    '''
+    if missing == []:
+        return
+    if args.qsub:
+        raise ValueError("--qsub cannot be used while job scripts have unfilled placeholders: " +
+                         ", ".join(missing))
+    print("Job script(s) contain placeholders to fill in before submission: " + ", ".join(missing))
 
 def finalise_job(args, templateName, values):
     '''
     Fills a job template, writes the job script and, if requested, submits it with qsub.
-    Submission is refused if any placeholders remain in the script.
-
+    Submission is refused if any placeholders remain in the script. Used by modes which
+    produce a single job script using the arguments of add_pbs_arguments() in psst.py.
+    
     Parameters:
         args -- an argparse.Namespace containing validated PBS arguments and args.qsub.
         templateName -- a string of the job template file name within the templates directory.
@@ -156,11 +189,11 @@ def finalise_job(args, templateName, values):
     '''
     body, missing = fill_template(templateName, values)
     if args.qsub and missing != []:
-        raise ValueError("--qsub cannot be used while the job script has unfilled placeholders: " +
-                         ", ".join(missing))
+        check_placeholders(args, missing) # raises an error before anything is written
     
-    write_job_script(args, body)
-    if missing != []:
-        print("Job script contains placeholders to fill in before submission: " + ", ".join(missing))
+    header = format_pbs_header(args.jobName, args.walltime, args.mem, args.cpus, args.rpid,
+                               afterok=args.afterok, afternotok=args.afternotok)
+    write_job_script(args.scriptFile, header, body)
+    check_placeholders(args, missing)
     if args.qsub:
         submit_job(args.scriptFile)

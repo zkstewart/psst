@@ -13,6 +13,8 @@
 
 import os, re, shutil
 
+from .basecalling import DORADO_SCRIPTS
+
 # Note: only values the user explicitly specified (recorded in args.userSet by the
 # UserSet argparse action) are checked to exist; default locations are used unchecked.
 
@@ -139,37 +141,50 @@ def validate_mmseqs2(args):
     if args.tmpDir != None:
         args.tmpDir = os.path.abspath(args.tmpDir)
 
-def validate_pbs(args):
+def validate_pbs_resources(cpus, mem, walltime, flagPrefix=""):
     '''
-    Validation for PBS arguments common to all job scripts. Called once by psst.py
-    after all mode-specific validation, since the default script name is derived
-    from the validated args.outputPrefix.
+    Validates the resource requests for one PBS job.
     
     Parameters:
-        args -- an argparse.Namespace containing PBS arguments, args.outputPrefix, and
-                args.scriptSuffix (set by each leaf parser) to name the script with as
-                either '<outputPrefix>.<scriptSuffix>.sh' or '<scriptSuffix>.sh' if
-                args.outputPrefix is None or is not an argument of the mode.
+        cpus -- an int of the number of CPUs to request.
+        mem -- a string of the memory to request (e.g., '70G').
+        walltime -- a string of the walltime in 'H', 'H:MM', or 'H:MM:SS' format.
+        flagPrefix -- OPTIONAL; a string prefixing the argument flags for error messages
+                      (e.g., 'p1-' for '--p1-cpus'); default == ''.
+    Returns:
+        walltime -- a string of the walltime normalised to 'HH:MM:SS' format.
     '''
-    # Validate resource requests
-    if args.cpus < 1:
-        raise ValueError("--cpus must be >= 1")
-
-    if re.match(r"^\d+[kmgt]?b?$", args.mem, re.IGNORECASE) == None:
-        raise FormatError(f"--mem '{args.mem}' is not a valid PBS memory value (e.g., '70G' or '70gb')")
-
-    hours, minutes, seconds = parse_walltime(args.walltime)
+    if cpus < 1:
+        raise ValueError(f"--{flagPrefix}cpus must be >= 1")
+    
+    if re.match(r"^\d+[kmgt]?b?$", mem, re.IGNORECASE) == None:
+        raise FormatError(f"--{flagPrefix}mem '{mem}' is not a valid PBS memory value (e.g., '70G' or '70gb')")
+    
+    hours, minutes, seconds = parse_walltime(walltime)
     if (hours * 3600 + minutes * 60 + seconds) > MAX_WALLTIME_HOURS * 3600:
-        raise ValueError(f"--walltime '{args.walltime}' exceeds the HPC limit of {MAX_WALLTIME_HOURS} hours")
+        raise ValueError(f"--{flagPrefix}walltime '{walltime}' exceeds the HPC limit of {MAX_WALLTIME_HOURS} hours")
     if (hours + minutes + seconds) == 0:
-        raise ValueError("--walltime must be greater than zero")
-    args.walltime = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        raise ValueError(f"--{flagPrefix}walltime must be greater than zero")
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-    # Validate job identifiers
-    if re.match(r"^[A-Za-z][^\s@#]*$", args.jobName) == None:
-        raise FormatError(f"--name '{args.jobName}' must start with a letter and not contain whitespace, '@' or '#'")
+def validate_job_name(jobName, flag="--name"):
+    '''
+    Parameters:
+        jobName -- a string of a PBS job name.
+        flag -- OPTIONAL; a string of the argument flag for error messages.
+    '''
+    if re.match(r"^[A-Za-z0-9_+][^\s@#]*$", jobName) == None:
+        raise FormatError(f"{flag} '{jobName}' must start with a letter, number, '_' or '+' and " +
+                          "not contain whitespace, '@' or '#'")
+
+def validate_pbs_submission(args):
+    '''
+    Validation for PBS submission arguments common to all modes (i.e., those added
+    by add_pbs_submission_arguments() in psst.py). Called once by psst.py after all
+    mode-specific validation.
+    '''
     args.rpid = validate_rpid(args.rpid)
-
+    
     # Validate job dependencies
     if args.afterok and args.afternotok:
         raise ValueError("--afterok and --afternotok are mutually exclusive")
@@ -177,10 +192,39 @@ def validate_pbs(args):
         for jobID in (jobIDs or []):
             if re.match(r"^[^\s:,]+$", jobID) == None:
                 raise FormatError(f"{flag} job ID '{jobID}' must not contain whitespace, ':' or ','")
-
+    
     # Validate that qsub is available if submission is requested
     if args.qsub and shutil.which("qsub") == None:
         raise FileNotFoundError("--qsub was specified but qsub is not available in your PATH")
+
+def validate_new_script(scriptFile, flag="--script"):
+    '''
+    Parameters:
+        scriptFile -- a string indicating where a job script will be written.
+        flag -- OPTIONAL; a string of the argument flag for error messages.
+    Returns:
+        scriptFile -- the absolute path of the script file.
+    '''
+    scriptFile = os.path.abspath(scriptFile)
+    if os.path.exists(scriptFile):
+        raise FileExistsError(f"Job script ({flag} {scriptFile}) already exists!")
+    return scriptFile
+
+def validate_pbs_job(args):
+    '''
+    Validation for the PBS arguments of modes which write a single job script (i.e.,
+    those added by add_pbs_arguments() in psst.py). Called once by psst.py after all
+    mode-specific validation, since the default script name is derived from the
+    validated args.outputPrefix.
+    
+    Parameters:
+        args -- an argparse.Namespace containing PBS arguments, args.outputPrefix, and
+                args.scriptSuffix (set by each leaf parser) to name the script with as
+                either '<outputPrefix>.<scriptSuffix>.sh' or '<scriptSuffix>.sh' if
+                args.outputPrefix is None or is not an argument of the mode.
+    '''
+    args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime)
+    validate_job_name(args.jobName)
     
     # Validate script file name
     if args.scriptFile == None:
@@ -188,9 +232,7 @@ def validate_pbs(args):
             args.scriptFile = f"{args.outputPrefix}.{args.scriptSuffix}.sh"
         else:
             args.scriptFile = f"{args.scriptSuffix}.sh"
-    args.scriptFile = os.path.abspath(args.scriptFile)
-    if os.path.exists(args.scriptFile):
-        raise FileExistsError(f"Job script (--script {args.scriptFile}) already exists!")
+    args.scriptFile = validate_new_script(args.scriptFile)
     if not os.path.isdir(os.path.dirname(args.scriptFile)):
         raise DirectoryNotFoundError(f"Job script (--script {args.scriptFile}) is in a directory that does not exist!")
 
@@ -283,3 +325,63 @@ def validate_b_run_mmseqs2(args):
     Validation for arguments used in "blast run mmseqs2" mode.
     '''
     validate_mmseqs2(args)
+
+def validate_bc(args):
+    '''
+    Validation for arguments common to all "basecalling" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_bc_dorado(args):
+    '''
+    Validation for arguments used in "basecalling dorado" mode.
+    '''
+    # Validate the run directory
+    args.workDir = os.path.abspath(args.workDir)
+    if not os.path.isdir(args.workDir):
+        raise DirectoryNotFoundError(f"Run directory (--workdir {args.workDir}) does not exist!")
+    pod5Dir = os.path.join(args.workDir, "pod5")
+    if not os.path.isdir(pod5Dir):
+        if args.qsub:
+            raise DirectoryNotFoundError(f"pod5 directory '{pod5Dir}' does not exist; cannot --qsub basecalling")
+        print(f"WARNING: pod5 directory '{pod5Dir}' does not exist yet; it must exist before submission")
+    
+    # Validate program locations
+    validate_program_dir(args, "doradoDir", os.path.join("bin", "dorado"), "--dorado")
+    for requiredFile in [os.path.join("basecalling", "dorado_correct_pipeline.py"),
+                         "fasta_handling_master_code.py", "fasta_concat.py"]:
+        validate_program_dir(args, "varScriptDir", requiredFile, "--varscripts")
+    validate_program_dir(args, "genScriptDir", "genome_stats.py", "--genscripts")
+    
+    # Validate behavioural parameters
+    if args.prefix != None and re.match(r"^[^\s/]+$", args.prefix) == None:
+        raise FormatError(f"-p '{args.prefix}' must not contain whitespace or '/'")
+    if re.match(r"^\S+$", args.model) == None:
+        raise FormatError(f"--model '{args.model}' must be non-empty and not contain whitespace")
+    if re.match(r"^\w+$", args.gpuID) == None:
+        raise FormatError(f"--gpuid '{args.gpuID}' must only contain letters, numbers or '_'")
+    if args.minReadLen < 1:
+        raise ValueError("--minreadlen must be >= 1")
+    if args.concatMinimum < 0:
+        raise ValueError("--concat-minimum must be >= 0")
+    if args.concatMultiline < 0:
+        raise ValueError("--concat-multiline must be >= 0")
+    
+    # Validate job names, which are derived from -p if --name is not given
+    if args.jobName == None:
+        args.jobName = args.prefix if args.prefix != None else "dorado"
+    validate_job_name(args.jobName)
+    
+    # Validate resources of each job
+    for step in ["p1", "p2", "corr", "s1", "s2", "concat"]:
+        walltime = validate_pbs_resources(getattr(args, f"{step}Cpus"), getattr(args, f"{step}Mem"),
+                                          getattr(args, f"{step}Walltime"), flagPrefix=f"{step}-")
+        setattr(args, f"{step}Walltime", walltime)
+    for step in ["s1", "s2"]: # dorado_correct_pipeline.py only accepts memory like '30G'
+        if re.match(r"^\d+G$", getattr(args, f"{step}Mem")) == None:
+            raise FormatError(f"--{step}-mem '{getattr(args, f'{step}Mem')}' must be in the format '<number>G' (e.g., '30G')")
+    
+    # Validate job script locations
+    args.scriptFiles = {}
+    for step, scriptName in DORADO_SCRIPTS.items():
+        args.scriptFiles[step] = validate_new_script(os.path.join(args.workDir, scriptName), "--workdir")
