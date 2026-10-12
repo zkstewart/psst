@@ -42,7 +42,8 @@ def basespace_prepare(args):
            "-d", args.readsDir,
            "-rs", args.readsSuffix,
            "-o", args.outputFileName,
-           "--laneIdentifier", args.laneIdentifier]
+           "--laneIdentifier", args.laneIdentifier,
+           "--rpid", args.rpid]
     if not args.symlink:
         cmd.append("--nosymlink")
     if args.singleEnd:

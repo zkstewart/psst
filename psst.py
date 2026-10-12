@@ -105,6 +105,20 @@ def add_pbs_resource_arguments(parser, walltime, mem, cpus, step=None, title=Non
                         or 'H:MM:SS' format (max 48 hours); default == '%(default)s'""",
                         default=walltime)
 
+def add_rpid_argument(parser):
+    '''
+    Adds the required RPID argument; used by add_pbs_submission_arguments() and by
+    any mode which passes an RPID to a script that writes its own job scripts.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser (or argument group) to add arguments to.
+    '''
+    shortcuts = ", ".join(f"{k}={v}" for k, v in RPID_SHORTCUTS.items())
+    parser.add_argument("--rpid", dest="rpid",
+                        required=True,
+                        help=f"""Research Project ID (RPID) to attach to the job via '#PBS -P';
+                        accepts a full RPID or a shortcut ({shortcuts})""")
+
 def add_pbs_submission_arguments(parser):
     '''
     Adds PBS submission arguments common to all modes to a leaf subparser.
@@ -114,11 +128,7 @@ def add_pbs_submission_arguments(parser):
     '''
     parser.set_defaults(pbsMode="multi") # add_pbs_arguments() overrides this
     g = parser.add_argument_group("PBS submission arguments")
-    shortcuts = ", ".join(f"{k}={v}" for k, v in RPID_SHORTCUTS.items())
-    g.add_argument("--rpid", dest="rpid",
-                   required=True,
-                   help=f"""Research Project ID (RPID) to attach to the job via '#PBS -P';
-                   accepts a full RPID or a shortcut ({shortcuts})""")
+    add_rpid_argument(g)
     g.add_argument("--qsub", dest="qsub",
                    required=False,
                    action="store_true",
@@ -567,6 +577,7 @@ def main():
                                  names; default == '%(default)s'""",
                                  default="_L00")
     add_varscripts_argument(bsprepareparser)
+    add_rpid_argument(bsprepareparser)
     
     # Basespace > archive mode
     bsarchiveparser = subBasespaceParsers.add_parser("archive",

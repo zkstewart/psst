@@ -418,6 +418,7 @@ def validate_bs_prepare(args):
     args.outputFileName = validate_new_script(args.outputFileName, "-o")
     
     # Validate parameters
+    args.rpid = validate_rpid(args.rpid)
     if args.readsSuffix == "":
         raise ValueError("-rs must be given a non-empty value")
     if args.laneIdentifier == "":
