@@ -432,3 +432,60 @@ def validate_bs_archive(args):
         raise FormatError(f"-p '{args.prefix}' must not contain whitespace")
     if args.readsDir == "":
         raise ValueError("--readsdir must be given a non-empty value")
+
+def validate_ratio(value, flag):
+    '''
+    Parameters:
+        value -- a float which should be in the range 0.0 -> 1.0.
+        flag -- a string of the argument flag for error messages.
+    '''
+    if not 0 <= value <= 1:
+        raise ValueError(f"{flag} must be a ratio in the range 0.0 -> 1.0")
+
+def validate_cl(args):
+    '''
+    Validation for arguments common to all "clustering" mode commands (i.e., those
+    added by add_clustering_arguments() in psst.py).
+    '''
+    validate_input_file(args, "fastaFile", "-i", "Input FASTA file")
+    validate_program_dir(args, "varScriptDir", "run_clustering.py", "--varscripts")
+    validate_ratio(args.identity, "--identity")
+    
+    # Validate output file, which run_clustering.py will not overwrite
+    if args.outputFile != None:
+        args.outputFile = os.path.abspath(args.outputFile)
+        if os.path.exists(args.outputFile):
+            raise FileExistsError(f"Output file (-o {args.outputFile}) already exists!")
+        if not os.path.isdir(os.path.dirname(args.outputFile)):
+            raise DirectoryNotFoundError(f"Output file (-o {args.outputFile}) is in a directory that does not exist!")
+
+def validate_cl_mmseqs2(args):
+    '''
+    Validation for arguments used in "clustering mmseqs2" mode.
+    '''
+    validate_program_dir(args, "mmseqsDir", "mmseqs", "--mmseqs")
+    validate_ratio(args.coverage, "--coverage")
+    if args.evalue < 0:
+        raise ValueError("--evalue must be >= 0")
+    if args.steps < 1:
+        raise ValueError("--steps must be >= 1")
+    
+    # Validate tmp directory, derived from the output file name if not given
+    if args.tmpDir == None and args.outputFile != None:
+        args.tmpDir = os.path.splitext(args.outputFile)[0] + "_tmp"
+    if args.tmpDir != None:
+        args.tmpDir = os.path.abspath(args.tmpDir)
+
+def validate_cl_cdhit(args):
+    '''
+    Validation for arguments used in "clustering cdhit" mode.
+    '''
+    validate_program_dir(args, "cdhitDir", "cd-hit", "--cdhit")
+    if args.cdhitMem < 1000:
+        raise ValueError("--cdhit-mem must be >= 1000 (MB)")
+    validate_ratio(args.shorterCov, "--shorter-coverage")
+    validate_ratio(args.longerCov, "--longer-coverage")
+    
+    # Validate the .clstr output file, which run_clustering.py will not overwrite
+    if args.outputFile != None and os.path.exists(args.outputFile + ".clstr"):
+        raise FileExistsError(f"Output file ({args.outputFile}.clstr) already exists!")

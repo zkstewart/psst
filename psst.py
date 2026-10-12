@@ -32,13 +32,16 @@ from modules.validation import \
         validate_bc_dorado, \
     validate_bs, \
         validate_bs_download, validate_bs_prepare, validate_bs_archive, \
+    validate_cl, \
+        validate_cl_mmseqs2, validate_cl_cdhit, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
 from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
-from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, \
+from modules.clustering import clustering_mmseqs2, clustering_cdhit
+from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
@@ -51,6 +54,8 @@ from _version import __version__
 #   so default locations on the HPC are never checked.
 # - Arguments without a sensible default should default to None, which leaves an
 #   '@@field@@' placeholder in the job script for the user to fill in.
+# - Argument dests must not reuse names used by psst itself to route arguments (e.g.,
+#   'mode' and the other subparser dests, 'func', 'scriptSuffix', 'pbsMode', 'userSet').
 # - Each leaf parser must set_defaults(func=<job function>). Single-job modes use
 #   add_pbs_arguments() and must also set_defaults(scriptSuffix=<str>); multi-job modes
 #   use add_pbs_submission_arguments() with add_pbs_resource_arguments() per job, and
@@ -67,6 +72,29 @@ class UserSet(argparse.Action):
         if not hasattr(namespace, "userSet"):
             namespace.userSet = set()
         namespace.userSet.add(self.dest)
+
+def check_reserved_dests(parser):
+    '''
+    Raises an error if any argument's dest reuses a name psst relies on to route
+    arguments (i.e., subparser dests and names set via set_defaults()), since argparse
+    would otherwise silently overwrite the routing value.
+    
+    Parameters:
+        parser -- the top-level argparse.ArgumentParser.
+    '''
+    reserved = {"func", "scriptSuffix", "pbsMode", "userSet"}
+    def _walk(parser):
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                reserved.add(action.dest)
+                for subparser in action.choices.values():
+                    yield from _walk(subparser)
+            else:
+                yield parser.prog, action.dest
+    argDests = list(_walk(parser)) # also populates reserved
+    for prog, dest in argDests:
+        if dest in reserved:
+            raise ValueError(f"'{prog}' has an argument with dest '{dest}', which is reserved by psst")
 
 def add_pbs_resource_arguments(parser, walltime, mem, cpus, step=None, title=None):
     '''
@@ -215,12 +243,54 @@ def add_mmseqs2_arguments(parser, database):
                         default == '<outprefix>_tmp' if -o is given, otherwise
                         left as a placeholder""",
                         default=None)
+    add_mmseqs_dir_argument(parser)
+    add_varscripts_argument(parser)
+
+def add_mmseqs_dir_argument(parser):
+    '''
+    Adds the MMseqs2 location argument to a leaf subparser for any job that runs MMseqs2.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+    '''
     parser.add_argument("--mmseqs", dest="mmseqsDir",
                         required=False,
                         action=UserSet,
                         help="""Optionally, specify the directory containing the mmseqs
                         executable; default == '%(default)s'""",
                         default=MMSEQS_DIR)
+
+def add_clustering_arguments(parser, identity):
+    '''
+    Adds arguments shared by clustering jobs which run Various_scripts/run_clustering.py.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+        identity -- a float of the default identity threshold for clustering.
+    '''
+    parser.add_argument("-i", "--fasta", dest="fastaFile",
+                        required=False,
+                        action=UserSet,
+                        help="""Optionally, specify the location of the FASTA file to cluster;
+                        default == left as a placeholder""",
+                        default=None)
+    parser.add_argument("-m", "--molecule", dest="molecule",
+                        required=False,
+                        choices=["protein", "nucleotide"],
+                        help="""Optionally, specify the molecule type of the FASTA file;
+                        default == left as a placeholder""",
+                        default=None)
+    parser.add_argument("-o", "--output", dest="outputFile",
+                        required=False,
+                        help="""Optionally, specify the output file name for clustering results;
+                        default == left as a placeholder""",
+                        default=None)
+    parser.add_argument("--identity", dest="identity",
+                        required=False,
+                        type=float,
+                        help="""Optionally, specify the identity threshold for clustering;
+                        default == %(default)s""",
+                        default=identity)
     add_varscripts_argument(parser)
 
 def add_varscripts_argument(parser):
@@ -639,6 +709,109 @@ def main():
     add_pbs_arguments(brunmparser, jobName="mms2",
                       walltime="46:00:00", mem="750G", cpus=32)
 
+    # Clustering subparser
+    clparser = subparsers.add_parser("clustering",
+                                     parents=[p],
+                                     add_help=False,
+                                     help="Sequence clustering jobs")
+    
+    subClusteringParsers = clparser.add_subparsers(dest="clusteringMode",
+                                                   required=True)
+    
+    # Clustering > mmseqs2 mode
+    clmmseqsparser = subClusteringParsers.add_parser("mmseqs2",
+                                                     parents=[p],
+                                                     add_help=False,
+                                                     help="Cluster sequences with MMseqs2")
+    clmmseqsparser.set_defaults(func=clustering_mmseqs2, scriptSuffix="mms2_clust")
+    add_clustering_arguments(clmmseqsparser, identity=0.85)
+    clmmseqsparser.add_argument("-p", "--program", dest="program",
+                                required=False,
+                                choices=["mmseqs-cascade", "mmseqs-linclust"],
+                                help="""Optionally, specify the MMseqs2 clustering algorithm;
+                                default == '%(default)s'""",
+                                default="mmseqs-cascade")
+    clmmseqsparser.add_argument("--coverage", dest="coverage",
+                                required=False,
+                                type=float,
+                                help="""Optionally, specify the coverage ratio for clustering;
+                                default == %(default)s""",
+                                default=0.6)
+    clmmseqsparser.add_argument("--evalue", dest="evalue",
+                                required=False,
+                                type=float,
+                                help="""Optionally, specify the E-value threshold for clustering;
+                                default == %(default)s""",
+                                default=1e-3)
+    clmmseqsparser.add_argument("--mode", dest="clusterMode",
+                                required=False,
+                                choices=["set-cover", "connected-component", "greedy"],
+                                help="""Optionally, specify the clustering mode;
+                                default == '%(default)s'""",
+                                default="connected-component")
+    clmmseqsparser.add_argument("--sensitivity", dest="sensitivity",
+                                required=False,
+                                choices=["1", "2", "3", "4", "5", "5.7", "6", "7", "7.5"],
+                                help="""Optionally, specify the sensitivity (cascade only);
+                                default == %(default)s""",
+                                default="4")
+    clmmseqsparser.add_argument("--steps", dest="steps",
+                                required=False,
+                                type=int,
+                                help="""Optionally, specify the number of cascaded clustering steps
+                                (cascade only); default == %(default)s""",
+                                default=3)
+    clmmseqsparser.add_argument("--tmp", dest="tmpDir",
+                                required=False,
+                                help="""Optionally, specify the MMseqs2 tmp directory;
+                                default == '<output without extension>_tmp' if -o is given,
+                                otherwise left as a placeholder""",
+                                default=None)
+    add_mmseqs_dir_argument(clmmseqsparser)
+    add_pbs_arguments(clmmseqsparser, jobName="mms2Clust",
+                      walltime="48:00:00", mem="80G", cpus=12)
+    
+    # Clustering > cdhit mode
+    clcdhitparser = subClusteringParsers.add_parser("cdhit",
+                                                    parents=[p],
+                                                    add_help=False,
+                                                    help="Cluster sequences with CD-HIT")
+    clcdhitparser.set_defaults(func=clustering_cdhit, scriptSuffix="cdhit_clust")
+    add_clustering_arguments(clcdhitparser, identity=0.97)
+    clcdhitparser.add_argument("--cdhit-mem", dest="cdhitMem",
+                               required=False,
+                               type=int,
+                               help="""Optionally, specify the memory (in MB) for CD-HIT to use, which
+                               should be less than --mem; default == %(default)s""",
+                               default=25000)
+    clcdhitparser.add_argument("--align", dest="align",
+                               required=False,
+                               choices=["local", "global"],
+                               help="""Optionally, specify whether CD-HIT should use local or global
+                               alignment; default == '%(default)s'""",
+                               default="global")
+    clcdhitparser.add_argument("--shorter-coverage", dest="shorterCov",
+                               required=False,
+                               type=float,
+                               help="""Optionally, specify the alignment coverage ratio for the
+                               shorter sequence; default == %(default)s""",
+                               default=0.9)
+    clcdhitparser.add_argument("--longer-coverage", dest="longerCov",
+                               required=False,
+                               type=float,
+                               help="""Optionally, specify the alignment coverage ratio for the
+                               longer sequence; default == %(default)s""",
+                               default=0.0)
+    clcdhitparser.add_argument("--cdhit", dest="cdhitDir",
+                               required=False,
+                               action=UserSet,
+                               help="""Optionally, specify the directory containing the CD-HIT
+                               executables; default == '%(default)s'""",
+                               default=CDHIT_DIR)
+    add_pbs_arguments(clcdhitparser, jobName="cdhit",
+                      walltime="48:00:00", mem="30G", cpus=8)
+    
+    check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
         args.userSet = set()
@@ -665,6 +838,11 @@ def main():
         validate_b(args)
         bmain(args)
 
+    if args.mode == "clustering":
+        print("## psst.py - Clustering handling ##")
+        validate_cl(args)
+        clmain(args)
+    
     # Validate PBS arguments and write (+/- submit) the job script(s)
     if args.pbsMode != None:
         validate_pbs_submission(args)
@@ -718,6 +896,15 @@ def bmain(args):
         if args.blastRunMode == "mmseqs2":
             print("## MMseqs2 query ##")
             validate_b_run_mmseqs2(args)
+
+def clmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.clusteringMode == "mmseqs2":
+        print("## MMseqs2 clustering ##")
+        validate_cl_mmseqs2(args)
+    if args.clusteringMode == "cdhit":
+        print("## CD-HIT clustering ##")
+        validate_cl_cdhit(args)
 
 if __name__ == "__main__":
     main()
