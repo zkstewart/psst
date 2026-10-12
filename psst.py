@@ -25,7 +25,8 @@ from modules.validation import \
         validate_at_generate, \
     validate_b, \
         validate_b_run, \
-            validate_b_run_mmseqs2
+            validate_b_run_mmseqs2, \
+    RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.blast import blast_run_mmseqs2
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, REFSEQ_PLANT_FASTA, UNIREF90_FASTA, \
@@ -65,13 +66,16 @@ def add_pbs_arguments(parser, jobName, walltime, mem, cpus):
                    help=f"""Optionally, specify the PBS job name;
                    default == '{jobName}'""",
                    default=jobName)
+    shortcuts = ", ".join(f"{k}={v}" for k, v in RPID_SHORTCUTS.items())
     g.add_argument("--rpid", dest="rpid",
                    required=True,
-                   help="Research Project ID (RPID) to attach to the job via '#PBS -P'")
+                   help=f"""Research Project ID (RPID) to attach to the job via '#PBS -P';
+                   accepts a full RPID or a shortcut ({shortcuts})""")
     g.add_argument("--script", dest="scriptFile",
                    required=False,
                    help="""Optionally, specify where to write the job script;
-                   default == '<outprefix>.<job>.sh'""",
+                   default == '<outprefix>.<job>.sh' if -o is given, otherwise
+                   '<job>.sh' in the current directory""",
                    default=None)
     g.add_argument("--qsub", dest="qsub",
                    required=False,
@@ -106,12 +110,12 @@ def add_mmseqs2_arguments(parser):
                         required=False,
                         help=f"""Optionally, specify the directory containing the mmseqs
                         executable; default == '{MMSEQS_DIR}'""",
-                        default=MMSEQS_DIR)
+                        default=None)
     parser.add_argument("--varscripts", dest="varScriptDir",
                         required=False,
                         help=f"""Optionally, specify the location of the Various_scripts
                         repository; default == '{VARSCRIPT_DIR}'""",
-                        default=VARSCRIPT_DIR)
+                        default=None)
 
 def main():
     usage = """%(prog)s launches PBS jobs with flexible configuration of values.
@@ -149,16 +153,20 @@ def main():
                                                       add_help=False,
                                                       help="Generate an annotable from BLAST + idmapping + go.obo files")
     atgenerateparser.add_argument("-q", dest="query",
-                                  required=True,
-                                  help="Location of query FASTA file")
+                                  required=False,
+                                  help="""Optionally, specify the location of the query FASTA file;
+                                  default == left as a placeholder""",
+                                  default=None)
     atgenerateparser.add_argument("-o", dest="outputPrefix",
-                                  required=True,
-                                  help="Prefix for output files")
+                                  required=False,
+                                  help="""Optionally, specify the prefix for output files;
+                                  default == left as a placeholder""",
+                                  default=None)
     atgenerateparser.add_argument("-d", dest="database",
                                   required=False,
                                   help=f"""Optionally, specify the location of the database FASTA file;
                                   default == '{REFSEQ_PLANT_FASTA}'""",
-                                  default=REFSEQ_PLANT_FASTA)
+                                  default=None)
     atgenerateparser.add_argument("--db", dest="databaseTag",
                                   required=False,
                                   choices=["UniRef100", "UniRef90", "UniRef50", "RefSeq", "."],
@@ -169,12 +177,12 @@ def main():
                                   required=False,
                                   help=f"""Optionally, specify the location of the idmapping_selected.tab file;
                                   default == '{IDMAPPING_FILE}'""",
-                                  default=IDMAPPING_FILE)
+                                  default=None)
     atgenerateparser.add_argument("--obo", dest="oboFile",
                                   required=False,
                                   help=f"""Optionally, specify the location of the go.obo file;
                                   default == '{OBO_FILE}'""",
-                                  default=OBO_FILE)
+                                  default=None)
     atgenerateparser.add_argument("--numhits", dest="numHits",
                                   required=False,
                                   type=int,
@@ -190,7 +198,8 @@ def main():
     atgenerateparser.add_argument("--tmp", dest="tmpDir",
                                   required=False,
                                   help="""Optionally, specify the MMseqs2 tmp directory;
-                                  default == '<outprefix>_tmp'""",
+                                  default == '<outprefix>_tmp' if -o is given, otherwise
+                                  left as a placeholder""",
                                   default=None)
     add_mmseqs2_arguments(atgenerateparser)
     add_pbs_arguments(atgenerateparser, jobName="annotable",
@@ -222,32 +231,45 @@ def main():
                                                 add_help=False,
                                                 help="Run a MMseqs2 job")
     brunmparser.add_argument("-q", dest="query",
-                             required=True,
-                             help="Location of query FASTA file")
+                             required=False,
+                             help="""Optionally, specify the location of the query FASTA file;
+                             default == left as a placeholder""",
+                             default=None)
     brunmparser.add_argument("-o", dest="outputPrefix",
-                             required=True,
-                             help="Prefix for output files")
+                             required=False,
+                             help="""Optionally, specify the prefix for output files;
+                             default == left as a placeholder""",
+                             default=None)
     brunmparser.add_argument("--tmp", dest="tmpDir",
-                             required=True,
-                             help="Location of MMseqs2 tmp directory")
+                             required=False,
+                             help="""Optionally, specify the MMseqs2 tmp directory;
+                             default == '<outprefix>_tmp' if -o is given, otherwise
+                             left as a placeholder""",
+                             default=None)
     brunmparser.add_argument("-n", dest="iterations",
-                             required=True,
+                             required=False,
                              type=int,
-                             help="Number of MMseqs2 search iterations")
+                             help="""Optionally, specify the number of MMseqs2 search iterations;
+                             default == 1""",
+                             default=1)
     brunmparser.add_argument("-s", dest="sensitivity",
-                             required=True,
+                             required=False,
                              type=float,
                              choices=[1, 2, 3, 4, 5, 5.7, 6, 7, 7.5],
-                             help="MMseqs2 search sensitivity")
+                             help="""Optionally, specify the MMseqs2 search sensitivity;
+                             default == 5.7""",
+                             default=5.7)
     brunmparser.add_argument("-t", dest="searchType",
-                             required=True,
+                             required=False,
                              choices=["auto", "blastn", "tblastx"],
-                             help="MMseqs2 search type")
+                             help="""Optionally, specify the MMseqs2 search type;
+                             default == 'auto'""",
+                             default="auto")
     brunmparser.add_argument("-d", dest="database",
                              required=False,
                              help=f"""Optionally, specify the location of the database FASTA file;
                              default == '{UNIREF90_FASTA}'""",
-                             default=UNIREF90_FASTA)
+                             default=None)
     add_mmseqs2_arguments(brunmparser)
     add_pbs_arguments(brunmparser, jobName="mms2",
                       walltime="46:00:00", mem="750G", cpus=32)

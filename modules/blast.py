@@ -14,7 +14,7 @@
 import os, sys
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from pbs import q, load_template, finalise_job
+from pbs import finalise_job
 
 def blast_run_mmseqs2(args):
     '''
@@ -24,16 +24,15 @@ def blast_run_mmseqs2(args):
     Parameters:
         args -- an argparse.Namespace containing validated "blast run mmseqs2" arguments.
     '''
-    body = load_template("run_mms2.sh").format(
-        mmseqsDir=q(args.mmseqsDir),
-        varScriptDir=q(args.varScriptDir),
-        query=q(args.query),
-        database=q(args.database),
-        outputPrefix=q(args.outputPrefix),
-        tmpDir=q(args.tmpDir),
-        cpus=args.cpus,
-        iterations=args.iterations,
-        sensitivity=f"{args.sensitivity:g}",
-        searchType=args.searchType
-    )
-    finalise_job(args, body)
+    finalise_job(args, "run_mms2.sh", {
+        "mmseqsDir": args.mmseqsDir,
+        "varScriptDir": args.varScriptDir,
+        "query": args.query,
+        "database": args.database,
+        "outputPrefix": args.outputPrefix,
+        "tmpDir": args.tmpDir,
+        "cpus": args.cpus,
+        "iterations": args.iterations,
+        "sensitivity": f"{args.sensitivity:g}" if args.sensitivity != None else None,
+        "searchType": args.searchType
+    })

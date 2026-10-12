@@ -41,6 +41,36 @@ def load_template(templateName):
     with open(templateFile, "r") as fileIn:
         return fileIn.read()
 
+class PlaceholderDict(dict):
+    '''
+    A dict for use with str.format_map() which leaves any keys it does not contain
+    as '{key}' placeholders in the formatted string, recording which were missed.
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.missing = []
+    
+    def __missing__(self, key):
+        if key not in self.missing:
+            self.missing.append(key)
+        return "{" + key + "}"
+
+def fill_template(templateName, values):
+    '''
+    Fills a template with values, shell-quoting each one. Any value that is None, or
+    any template field absent from values, is left as a '{field}' placeholder.
+    
+    Parameters:
+        templateName -- a string of the template file name within the templates directory.
+        values -- a dict of template field names to values (or None).
+    Returns:
+        filled -- a string of the template with values filled in.
+        missing -- a list of template field names left as placeholders.
+    '''
+    placeholders = PlaceholderDict({ k: q(v) for k, v in values.items() if v != None })
+    filled = load_template(templateName).format_map(placeholders)
+    return filled, placeholders.missing
+
 def format_pbs_header(args, afterok=None, afternotok=None):
     '''
     Parameters:
@@ -104,14 +134,23 @@ def submit_job(scriptFile):
     print(f"Job submitted as '{jobID}'")
     return jobID
 
-def finalise_job(args, body):
+def finalise_job(args, templateName, values):
     '''
-    Writes the job script and, if requested, submits it with qsub.
+    Fills a job template, writes the job script and, if requested, submits it with qsub.
+    Submission is refused if any placeholders remain in the script.
 
     Parameters:
         args -- an argparse.Namespace containing validated PBS arguments and args.qsub.
-        body -- a string containing the job-specific script contents.
+        templateName -- a string of the job template file name within the templates directory.
+        values -- a dict of template field names to values (or None).
     '''
+    body, missing = fill_template(templateName, values)
+    if args.qsub and missing != []:
+        raise ValueError("--qsub cannot be used while the job script has unfilled placeholders: " +
+                         ", ".join(missing))
+    
     write_job_script(args, body)
+    if missing != []:
+        print("Job script contains placeholders to fill in before submission: " + ", ".join(missing))
     if args.qsub:
         submit_job(args.scriptFile)
