@@ -26,6 +26,7 @@ VARSCRIPT_DIR = CONFIG["programs"]["various_scripts_dir"]
 GENSCRIPT_DIR = CONFIG["programs"]["genome_analysis_scripts_dir"]
 COMPLEASM_DIR = CONFIG["programs"]["compleasm_dir"]
 DORADO_DIR = CONFIG["programs"]["dorado_dir"]
+BASESPACE_DIR = CONFIG["programs"]["basespace_dir"]
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = CONFIG["databases"]["refseq_plant_fasta"]

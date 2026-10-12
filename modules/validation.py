@@ -382,3 +382,52 @@ def validate_bc_dorado(args):
     args.scriptFiles = {}
     for step, scriptName in DORADO_SCRIPTS.items():
         args.scriptFiles[step] = validate_new_script(os.path.join(args.workDir, scriptName), "--workdir")
+
+def validate_bs(args):
+    '''
+    Validation for arguments common to all "basespace" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_bs_download(args):
+    '''
+    Validation for arguments used in "basespace download" mode.
+    '''
+    validate_program_dir(args, "bsDir", "bs", "--bs")
+    if args.projectID != None and re.match(r"^\d+$", args.projectID) == None:
+        raise FormatError(f"-i '{args.projectID}' must be a numeric BaseSpace project ID")
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+
+def validate_bs_prepare(args):
+    '''
+    Validation for arguments used in "basespace prepare" mode. Since this mode runs a
+    script immediately rather than writing a job script, default locations are checked
+    as well as user-specified ones.
+    '''
+    # Validate program location
+    args.varScriptDir = os.path.abspath(args.varScriptDir)
+    requiredFile = os.path.join(args.varScriptDir, "Fasta_related", "concatenate_trimmed_lanes.py")
+    if not os.path.isfile(requiredFile):
+        raise FileNotFoundError(f"Fasta_related/concatenate_trimmed_lanes.py not found in --varscripts {args.varScriptDir}")
+    
+    # Validate input and output locations
+    args.readsDir = os.path.abspath(args.readsDir)
+    if not os.path.isdir(args.readsDir):
+        raise DirectoryNotFoundError(f"Reads directory (-d {args.readsDir}) does not exist!")
+    args.outputFileName = validate_new_script(args.outputFileName, "-o")
+    
+    # Validate parameters
+    if args.readsSuffix == "":
+        raise ValueError("-rs must be given a non-empty value")
+    if args.laneIdentifier == "":
+        raise ValueError("--laneIdentifier must be given a non-empty value")
+
+def validate_bs_archive(args):
+    '''
+    Validation for arguments used in "basespace archive" mode.
+    '''
+    if args.prefix != None and re.match(r"^\S+$", args.prefix) == None:
+        raise FormatError(f"-p '{args.prefix}' must not contain whitespace")
+    if args.readsDir == "":
+        raise ValueError("--readsdir must be given a non-empty value")

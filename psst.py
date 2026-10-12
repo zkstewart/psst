@@ -30,12 +30,15 @@ from modules.validation import \
             validate_b_run_mmseqs2, \
     validate_bc, \
         validate_bc_dorado, \
+    validate_bs, \
+        validate_bs_download, validate_bs_prepare, validate_bs_archive, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
 from modules.basecalling import basecalling_dorado
+from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
-from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, \
+from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
@@ -51,7 +54,8 @@ from _version import __version__
 # - Each leaf parser must set_defaults(func=<job function>). Single-job modes use
 #   add_pbs_arguments() and must also set_defaults(scriptSuffix=<str>); multi-job modes
 #   use add_pbs_submission_arguments() with add_pbs_resource_arguments() per job, and
-#   validate their own job resources and script locations.
+#   validate their own job resources and script locations. Modes which do not write
+#   job scripts (e.g., wrappers that run a script immediately) use neither.
 
 class UserSet(argparse.Action):
     '''
@@ -108,7 +112,7 @@ def add_pbs_submission_arguments(parser):
     Parameters:
         parser -- an argparse.ArgumentParser to add arguments to.
     '''
-    parser.set_defaults(singleJob=False) # add_pbs_arguments() overrides this
+    parser.set_defaults(pbsMode="multi") # add_pbs_arguments() overrides this
     g = parser.add_argument_group("PBS submission arguments")
     shortcuts = ", ".join(f"{k}={v}" for k, v in RPID_SHORTCUTS.items())
     g.add_argument("--rpid", dest="rpid",
@@ -162,7 +166,7 @@ def add_pbs_arguments(parser, jobName, walltime, mem, cpus):
                    '<job>.sh' in the current directory""",
                    default=None)
     add_pbs_submission_arguments(parser)
-    parser.set_defaults(singleJob=True)
+    parser.set_defaults(pbsMode="single")
 
 def add_mmseqs2_arguments(parser, database):
     '''
@@ -276,6 +280,8 @@ def main():
                                  action="version",
                                  version="psst.py {version}".format(version=__version__))
 
+    subParentParser.set_defaults(pbsMode=None) # overridden by leaf parsers with PBS arguments
+    
     subparsers = subParentParser.add_subparsers(dest="mode",
                                                 required=True)
 
@@ -488,6 +494,99 @@ def main():
                                walltime="03:00:00", mem="30G", cpus=1)
     add_pbs_submission_arguments(bcdoradoparser)
     
+    # Basespace subparser
+    bsparser = subparsers.add_parser("basespace",
+                                     parents=[p],
+                                     add_help=False,
+                                     help="Illumina BaseSpace read handling")
+    
+    subBasespaceParsers = bsparser.add_subparsers(dest="basespaceMode",
+                                                  required=True)
+    
+    # Basespace > download mode
+    bsdownloadparser = subBasespaceParsers.add_parser("download",
+                                                      parents=[p],
+                                                      add_help=False,
+                                                      help="Download a BaseSpace project")
+    bsdownloadparser.set_defaults(func=basespace_download, scriptSuffix="bs_download")
+    bsdownloadparser.add_argument("-i", "--project", dest="projectID",
+                                  required=False,
+                                  help="""Optionally, specify the BaseSpace project ID to download (find
+                                  this with 'bs projects list'); default == left as a placeholder""",
+                                  default=None)
+    bsdownloadparser.add_argument("--outdir", dest="outputDir",
+                                  required=False,
+                                  help="""Optionally, specify the directory to download into, relative to
+                                  the directory the job is submitted from; default == '%(default)s'""",
+                                  default="downloaded")
+    bsdownloadparser.add_argument("--bs", dest="bsDir",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify the directory containing the bs executable;
+                                  default == '%(default)s'""",
+                                  default=BASESPACE_DIR)
+    add_pbs_arguments(bsdownloadparser, jobName="bs_download",
+                      walltime="48:00:00", mem="35G", cpus=1)
+    
+    # Basespace > prepare mode
+    bsprepareparser = subBasespaceParsers.add_parser("prepare",
+                                                     parents=[p],
+                                                     add_help=False,
+                                                     help="""Run concatenate_trimmed_lanes.py to write a script that
+                                                     merges reads split across lanes (runs immediately; not a PBS job)""")
+    bsprepareparser.set_defaults(func=basespace_prepare)
+    bsprepareparser.add_argument("-d", "--readsdir", dest="readsDir",
+                                 required=False,
+                                 help="""Optionally, specify the directory containing the downloaded reads;
+                                 default == '%(default)s'""",
+                                 default="reads")
+    bsprepareparser.add_argument("-rs", "--suffix", dest="readsSuffix",
+                                 required=False,
+                                 help="""Optionally, specify the suffix which identifies read files, where the
+                                 character before it is 1 or 2 for paired reads; default == '%(default)s'""",
+                                 default="_001.fastq.gz")
+    bsprepareparser.add_argument("-o", "--output", dest="outputFileName",
+                                 required=False,
+                                 help="""Optionally, specify where to write the read preparation script;
+                                 its directory is created if needed; default == '%(default)s'""",
+                                 default=os.path.join("prepared_reads", "run_read_prep.sh"))
+    bsprepareparser.add_argument("--symlink", dest="symlink",
+                                 required=False,
+                                 action="store_true",
+                                 help="""Optionally, symlink reads from samples sequenced on a single lane
+                                 rather than copying them""",
+                                 default=False)
+    bsprepareparser.add_argument("--singleEnd", dest="singleEnd",
+                                 required=False,
+                                 action="store_true",
+                                 help="""Optionally, indicate that reads are single-end rather than paired""",
+                                 default=False)
+    bsprepareparser.add_argument("--laneIdentifier", dest="laneIdentifier",
+                                 required=False,
+                                 help="""Optionally, specify the text preceding the lane number in file
+                                 names; default == '%(default)s'""",
+                                 default="_L00")
+    add_varscripts_argument(bsprepareparser)
+    
+    # Basespace > archive mode
+    bsarchiveparser = subBasespaceParsers.add_parser("archive",
+                                                     parents=[p],
+                                                     add_help=False,
+                                                     help="Archive downloaded reads into a .tar file with an md5 checksum")
+    bsarchiveparser.set_defaults(func=basespace_archive, scriptSuffix="archive")
+    bsarchiveparser.add_argument("-p", "--prefix", dest="prefix",
+                                 required=False,
+                                 help="""Optionally, specify the prefix of the .tar archive file;
+                                 default == left as a placeholder""",
+                                 default=None)
+    bsarchiveparser.add_argument("--readsdir", dest="readsDir",
+                                 required=False,
+                                 help="""Optionally, specify the directory to archive, relative to the
+                                 directory the job is submitted from; default == '%(default)s'""",
+                                 default="downloaded")
+    add_pbs_arguments(bsarchiveparser, jobName="tar",
+                      walltime="12:00:00", mem="30G", cpus=1)
+    
     # Blast subparser
     bparser = subparsers.add_parser("blast",
                                     parents=[p],
@@ -546,14 +645,19 @@ def main():
         print("## psst.py - Basecalling handling ##")
         validate_bc(args)
         bcmain(args)
+    if args.mode == "basespace":
+        print("## psst.py - BaseSpace handling ##")
+        validate_bs(args)
+        bsmain(args)
     if args.mode == "blast":
         print("## psst.py - BLAST handling ##")
         validate_b(args)
         bmain(args)
 
     # Validate PBS arguments and write (+/- submit) the job script(s)
-    validate_pbs_submission(args)
-    if args.singleJob:
+    if args.pbsMode != None:
+        validate_pbs_submission(args)
+    if args.pbsMode == "single":
         validate_pbs_job(args)
     args.func(args)
 
@@ -583,6 +687,18 @@ def bcmain(args):
     if args.basecallingMode == "dorado":
         print("## dorado basecalling and read correction ##")
         validate_bc_dorado(args)
+
+def bsmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.basespaceMode == "download":
+        print("## BaseSpace project download ##")
+        validate_bs_download(args)
+    if args.basespaceMode == "prepare":
+        print("## Prepare reads split across lanes ##")
+        validate_bs_prepare(args)
+    if args.basespaceMode == "archive":
+        print("## Archive downloaded reads ##")
+        validate_bs_archive(args)
 
 def bmain(args):
     # Split into sub-mode-specific validation functions
