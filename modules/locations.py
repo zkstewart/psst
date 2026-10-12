@@ -19,9 +19,15 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 # Program locations on the HPC
 MMSEQS_DIR = "/home/stewarz2/various_programs/mmseqs/bin"
 VARSCRIPT_DIR = "/home/stewarz2/scripts/Various_scripts"
+GENSCRIPT_DIR = "/home/stewarz2/scripts/Genome_analysis_scripts"
+COMPLEASM_DIR = "/home/stewarz2/various_programs/compleasm_kit"
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = "/home/stewarz2/various_programs/refseq_db/refseq_plant.protein.faa"
 UNIREF90_FASTA = "/home/stewarz2/various_programs/uniref_db/uniref90.fasta"
 IDMAPPING_FILE = "/home/stewarz2/various_programs/uniref_db/idmapping_selected.tab"
 OBO_FILE = "/home/stewarz2/various_programs/uniref_db/go.obo"
+
+# Reference genome locations on the HPC
+BUSK_HAP1_FASTA = "/work/ePGL/genomes/citrus/bundaberg/Busk/Busk.hap1.fasta"
+BUSK_HAP2_FASTA = "/work/ePGL/genomes/citrus/bundaberg/Busk/Busk.hap2.fasta"

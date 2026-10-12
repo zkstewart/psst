@@ -149,7 +149,7 @@ def validate_pbs(args):
         args -- an argparse.Namespace containing PBS arguments, args.outputPrefix, and
                 args.scriptSuffix (set by each leaf parser) to name the script with as
                 either '<outputPrefix>.<scriptSuffix>.sh' or '<scriptSuffix>.sh' if
-                args.outputPrefix is None.
+                args.outputPrefix is None or is not an argument of the mode.
     '''
     # Validate resource requests
     if args.cpus < 1:
@@ -184,7 +184,7 @@ def validate_pbs(args):
     
     # Validate script file name
     if args.scriptFile == None:
-        if args.outputPrefix != None:
+        if getattr(args, "outputPrefix", None) != None: # not all modes have an output prefix
             args.scriptFile = f"{args.outputPrefix}.{args.scriptSuffix}.sh"
         else:
             args.scriptFile = f"{args.scriptSuffix}.sh"
@@ -193,6 +193,57 @@ def validate_pbs(args):
         raise FileExistsError(f"Job script (--script {args.scriptFile}) already exists!")
     if not os.path.isdir(os.path.dirname(args.scriptFile)):
         raise DirectoryNotFoundError(f"Job script (--script {args.scriptFile}) is in a directory that does not exist!")
+
+def validate_as(args):
+    '''
+    Validation for arguments common to all "assembly" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_as_hifiasm(args):
+    '''
+    Validation for arguments used in "assembly hifiasm" mode.
+    '''
+    # Validate program locations
+    validate_program_dir(args, "genScriptDir", "genome_stats.py", "--genscripts")
+    validate_program_dir(args, "compleasmDir", "compleasm.py", "--compleasm")
+    
+    # Validate Hi-C arguments
+    if args.hicFiles == None:
+        if "ploidy" in args.userSet:
+            raise ValueError("--ploidy is only used for Hi-C assembly; specify --hic to use it")
+    else:
+        if len(args.hicFiles) not in [0, 2]:
+            raise ValueError(f"--hic must be given either 0 or 2 files, not {len(args.hicFiles)}")
+        for i, hicFile in enumerate(args.hicFiles):
+            args.hicFiles[i] = os.path.abspath(hicFile)
+            if not os.path.isfile(args.hicFiles[i]):
+                raise FileNotFoundError(f"Hi-C file (--hic {args.hicFiles[i]}) does not exist!")
+    
+    # Validate parameters
+    if args.ploidy < 1:
+        raise ValueError("--ploidy must be >= 1")
+    if args.lineage == "":
+        raise ValueError("--lineage must be given a non-empty value")
+
+def validate_as_revcomp(args):
+    '''
+    Validation for arguments used in "assembly revcomp" mode.
+    '''
+    validate_program_dir(args, "varScriptDir", os.path.join("assembly", "revcomp_to_match_reference.py"), "--varscripts")
+    validate_input_file(args, "refGenome", "-r", "Reference genome FASTA file")
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+
+def validate_as_scaffolding(args):
+    '''
+    Validation for arguments used in "assembly scaffolding" mode.
+    '''
+    validate_program_dir(args, "varScriptDir", os.path.join("assembly", "haplotype_scaffolding_pipeline.py"), "--varscripts")
+    validate_input_file(args, "refHap1", "--refhap1", "Reference haplotype 1 FASTA file")
+    validate_input_file(args, "refHap2", "--refhap2", "Reference haplotype 2 FASTA file")
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
 
 def validate_at(args):
     '''

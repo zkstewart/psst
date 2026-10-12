@@ -21,6 +21,8 @@ import os, argparse, sys
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from modules.validation import \
+    validate_as, \
+        validate_as_hifiasm, validate_as_revcomp, validate_as_scaffolding, \
     validate_at, \
         validate_at_generate, \
     validate_b, \
@@ -28,9 +30,11 @@ from modules.validation import \
             validate_b_run_mmseqs2, \
     validate_pbs, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
+from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
 from modules.blast import blast_run_mmseqs2
-from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, REFSEQ_PLANT_FASTA, UNIREF90_FASTA, \
-    IDMAPPING_FILE, OBO_FILE
+from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, \
+    REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
+    BUSK_HAP1_FASTA, BUSK_HAP2_FASTA
 from _version import __version__
 
 # Argument conventions:
@@ -162,12 +166,57 @@ def add_mmseqs2_arguments(parser, database):
                         help="""Optionally, specify the directory containing the mmseqs
                         executable; default == '%(default)s'""",
                         default=MMSEQS_DIR)
+    add_varscripts_argument(parser)
+
+def add_varscripts_argument(parser):
+    '''
+    Adds the Various_scripts location argument to a leaf subparser for any job that
+    runs scripts from the Various_scripts repository.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+    '''
     parser.add_argument("--varscripts", dest="varScriptDir",
                         required=False,
                         action=UserSet,
                         help="""Optionally, specify the location of the Various_scripts
                         repository; default == '%(default)s'""",
                         default=VARSCRIPT_DIR)
+
+def add_genscripts_argument(parser):
+    '''
+    Adds the Genome_analysis_scripts location argument to a leaf subparser for any job
+    that runs scripts from the Genome_analysis_scripts repository.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+    '''
+    parser.add_argument("--genscripts", dest="genScriptDir",
+                        required=False,
+                        action=UserSet,
+                        help="""Optionally, specify the location of the Genome_analysis_scripts
+                        repository; default == '%(default)s'""",
+                        default=GENSCRIPT_DIR)
+
+def add_preset_arguments(parser):
+    '''
+    Adds output directory and minimap2 preset arguments to a leaf subparser for
+    Various_scripts/assembly pipelines that share these behavioural parameters.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+    '''
+    parser.add_argument("--outdir", dest="outputDir",
+                        required=False,
+                        help="""Optionally, specify the output directory, relative to the
+                        directory the job is submitted from; default == '%(default)s'""",
+                        default="output")
+    parser.add_argument("--preset", dest="preset",
+                        required=False,
+                        choices=["asm5", "asm10", "asm20"],
+                        help="""Optionally, specify the minimap2 alignment preset;
+                        default == '%(default)s'""",
+                        default="asm20")
 
 def main():
     usage = """%(prog)s launches PBS jobs with flexible configuration of values.
@@ -232,6 +281,91 @@ def main():
     add_pbs_arguments(atgenerateparser, jobName="annotable",
                       walltime="06:00:00", mem="70G", cpus=12)
 
+    # Assembly subparser
+    asparser = subparsers.add_parser("assembly",
+                                     parents=[p],
+                                     add_help=False,
+                                     help="Genome assembly jobs")
+    
+    subAssemblyParsers = asparser.add_subparsers(dest="assemblyMode",
+                                                 required=True)
+    
+    # Assembly > hifiasm mode
+    ashifiasmparser = subAssemblyParsers.add_parser("hifiasm",
+                                                    parents=[p],
+                                                    add_help=False,
+                                                    help="Assemble a genome with hifiasm (optionally with Hi-C)")
+    ashifiasmparser.set_defaults(func=assembly_hifiasm, scriptSuffix="hifiasm")
+    ashifiasmparser.add_argument("--hic", dest="hicFiles",
+                                 required=False,
+                                 nargs="*",
+                                 metavar="FASTQ",
+                                 help="""Optionally, run a Hi-C assembly; give the two Hi-C read
+                                 files (R1 R2), or no files to leave them as placeholders;
+                                 default == no Hi-C""",
+                                 default=None)
+    ashifiasmparser.add_argument("--ploidy", dest="ploidy",
+                                 required=False,
+                                 type=int,
+                                 action=UserSet,
+                                 help="""Optionally, specify the ploidy for a Hi-C assembly (requires
+                                 --hic); default == %(default)s""",
+                                 default=2)
+    ashifiasmparser.add_argument("--lineage", dest="lineage",
+                                 required=False,
+                                 help="""Optionally, specify the compleasm lineage to search;
+                                 default == '%(default)s'""",
+                                 default="eudicotyledons")
+    ashifiasmparser.add_argument("--compleasm", dest="compleasmDir",
+                                 required=False,
+                                 action=UserSet,
+                                 help="""Optionally, specify the directory containing compleasm.py;
+                                 default == '%(default)s'""",
+                                 default=COMPLEASM_DIR)
+    add_genscripts_argument(ashifiasmparser)
+    add_pbs_arguments(ashifiasmparser, jobName="asm",
+                      walltime="24:00:00", mem="90G", cpus=14)
+    
+    # Assembly > revcomp mode
+    asrevcompparser = subAssemblyParsers.add_parser("revcomp",
+                                                    parents=[p],
+                                                    add_help=False,
+                                                    help="Reverse complement haplotypes to match a reference genome")
+    asrevcompparser.set_defaults(func=assembly_revcomp, scriptSuffix="revcomp")
+    asrevcompparser.add_argument("-r", "--reference", dest="refGenome",
+                                 required=False,
+                                 action=UserSet,
+                                 help="""Optionally, specify the location of the reference genome FASTA file;
+                                 default == '%(default)s'""",
+                                 default=BUSK_HAP1_FASTA)
+    add_preset_arguments(asrevcompparser)
+    add_varscripts_argument(asrevcompparser)
+    add_pbs_arguments(asrevcompparser, jobName="revcomp",
+                      walltime="12:00:00", mem="60G", cpus=8)
+    
+    # Assembly > scaffolding mode
+    asscaffoldparser = subAssemblyParsers.add_parser("scaffolding",
+                                                     parents=[p],
+                                                     add_help=False,
+                                                     help="Scaffold haplotypes against a diploid reference genome")
+    asscaffoldparser.set_defaults(func=assembly_scaffolding, scriptSuffix="scaffolding")
+    asscaffoldparser.add_argument("--refhap1", dest="refHap1",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify the location of the reference haplotype 1
+                                  FASTA file; default == '%(default)s'""",
+                                  default=BUSK_HAP1_FASTA)
+    asscaffoldparser.add_argument("--refhap2", dest="refHap2",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify the location of the reference haplotype 2
+                                  FASTA file; default == '%(default)s'""",
+                                  default=BUSK_HAP2_FASTA)
+    add_preset_arguments(asscaffoldparser)
+    add_varscripts_argument(asscaffoldparser)
+    add_pbs_arguments(asscaffoldparser, jobName="scaffolding",
+                      walltime="12:00:00", mem="70G", cpus=8)
+    
     # Blast subparser
     bparser = subparsers.add_parser("blast",
                                     parents=[p],
@@ -282,6 +416,10 @@ def main():
         print("## psst.py - Annotation table handling ##")
         validate_at(args)
         atmain(args)
+    if args.mode == "assembly":
+        print("## psst.py - Genome assembly handling ##")
+        validate_as(args)
+        asmain(args)
     if args.mode == "blast":
         print("## psst.py - BLAST handling ##")
         validate_b(args)
@@ -299,6 +437,18 @@ def atmain(args):
     if args.annotableMode == "generate":
         print("## Annotable generation ##")
         validate_at_generate(args)
+
+def asmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.assemblyMode == "hifiasm":
+        print("## hifiasm genome assembly ##")
+        validate_as_hifiasm(args)
+    if args.assemblyMode == "revcomp":
+        print("## Reverse complement haplotypes to match reference ##")
+        validate_as_revcomp(args)
+    if args.assemblyMode == "scaffolding":
+        print("## Haplotype scaffolding ##")
+        validate_as_scaffolding(args)
 
 def bmain(args):
     # Split into sub-mode-specific validation functions
