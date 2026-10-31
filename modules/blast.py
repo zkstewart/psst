@@ -21,7 +21,7 @@ def blast_run_mmseqs2(args):
     Parameters:
         args -- an argparse.Namespace containing validated "blast run mmseqs2" arguments.
     '''
-    finalise_job(args, "run_mms2.sh", {
+    finalise_job(args, "blast/run_mms2.sh", {
         "mmseqsDir": args.mmseqsDir,
         "varScriptDir": args.varScriptDir,
         "query": args.query,

@@ -23,7 +23,7 @@ def basespace_download(args):
     Parameters:
         args -- an argparse.Namespace containing validated "basespace download" arguments.
     '''
-    finalise_job(args, "run_basespace_download.sh", {
+    finalise_job(args, "basespace/run_basespace_download.sh", {
         "bsDir": args.bsDir,
         "projectID": args.projectID,
         "outputDir": args.outputDir
@@ -65,7 +65,7 @@ def basespace_archive(args):
     Parameters:
         args -- an argparse.Namespace containing validated "basespace archive" arguments.
     '''
-    finalise_job(args, "archive_download.sh", {
+    finalise_job(args, "basespace/archive_download.sh", {
         "readsDir": args.readsDir,
         "prefix": args.prefix
     })

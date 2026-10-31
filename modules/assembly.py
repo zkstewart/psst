@@ -29,10 +29,10 @@ def assembly_hifiasm(args):
         "lineage": args.lineage
     }
     if args.hicFiles == None:
-        finalise_job(args, "run_hifiasm_assembly.sh", values)
+        finalise_job(args, "assembly/run_hifiasm_assembly.sh", values)
     else:
         hic1, hic2 = args.hicFiles if args.hicFiles != [] else (None, None)
-        finalise_job(args, "run_hifiasm_assembly.hic.sh", {
+        finalise_job(args, "assembly/run_hifiasm_assembly.hic.sh", {
             **values,
             "ploidy": args.ploidy,
             "hic1": hic1,
@@ -47,7 +47,7 @@ def assembly_revcomp(args):
     Parameters:
         args -- an argparse.Namespace containing validated "assembly revcomp" arguments.
     '''
-    finalise_job(args, "run_revcomp.sh", {
+    finalise_job(args, "assembly/run_revcomp.sh", {
         "varScriptDir": args.varScriptDir,
         "refGenome": args.refGenome,
         "cpus": args.cpus,
@@ -63,7 +63,7 @@ def assembly_scaffolding(args):
     Parameters:
         args -- an argparse.Namespace containing validated "assembly scaffolding" arguments.
     '''
-    finalise_job(args, "run_scaffolding_pipeline.sh", {
+    finalise_job(args, "assembly/run_scaffolding_pipeline.sh", {
         "varScriptDir": args.varScriptDir,
         "paf2dotplotDir": args.paf2dotplotDir,
         "refHap1": args.refHap1,

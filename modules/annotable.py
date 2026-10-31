@@ -21,7 +21,7 @@ def annotable_generate(args):
     Parameters:
         args -- an argparse.Namespace containing validated "annotable generate" arguments.
     '''
-    finalise_job(args, "mms2_table_generation.sh", {
+    finalise_job(args, "annotable/mms2_table_generation.sh", {
         "mmseqsDir": args.mmseqsDir,
         "varScriptDir": args.varScriptDir,
         "query": args.query,

@@ -34,7 +34,7 @@ def q(value):
 def load_template(templateName):
     '''
     Parameters:
-        templateName -- a string of the template file name within the templates directory.
+        templateName -- a string of the template path relative to the templates directory.
     Returns:
         template -- a string of the template contents containing '@@field@@' placeholders.
     '''
@@ -53,7 +53,7 @@ def fill_template(templateName, values, quote=True):
     template field; this catches typos between templates and the modules filling them.
     
     Parameters:
-        templateName -- a string of the template file name within the templates directory.
+        templateName -- a string of the template path relative to the templates directory.
         values -- a dict of template field names to values (or None).
         quote -- OPTIONAL; a boolean indicating whether to shell-quote values; default == True.
     Returns:
@@ -184,7 +184,7 @@ def finalise_job(args, templateName, values):
     
     Parameters:
         args -- an argparse.Namespace containing validated PBS arguments and args.qsub.
-        templateName -- a string of the job template file name within the templates directory.
+        templateName -- a string of the job template path relative to the templates directory.
         values -- a dict of template field names to values (or None).
     '''
     body, missing = fill_template(templateName, values)

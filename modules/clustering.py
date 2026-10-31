@@ -21,7 +21,7 @@ def clustering_mmseqs2(args):
     Parameters:
         args -- an argparse.Namespace containing validated "clustering mmseqs2" arguments.
     '''
-    finalise_job(args, "run_mmseqs_clust.sh", {
+    finalise_job(args, "clustering/run_mmseqs_clust.sh", {
         "varScriptDir": args.varScriptDir,
         "mmseqsDir": args.mmseqsDir,
         "fasta": args.fastaFile,
@@ -46,7 +46,7 @@ def clustering_cdhit(args):
     Parameters:
         args -- an argparse.Namespace containing validated "clustering cdhit" arguments.
     '''
-    finalise_job(args, "run_cdhit_clust.sh", {
+    finalise_job(args, "clustering/run_cdhit_clust.sh", {
         "varScriptDir": args.varScriptDir,
         "cdhitDir": args.cdhitDir,
         "fasta": args.fastaFile,

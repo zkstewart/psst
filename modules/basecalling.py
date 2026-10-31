@@ -75,7 +75,7 @@ def basecalling_dorado(args):
     scripts = []
     missing = []
     for step, values, headerArgs in jobs:
-        body, stepMissing = fill_template(os.path.basename(DORADO_SCRIPTS[step]), values)
+        body, stepMissing = fill_template(os.path.join("basecalling", os.path.basename(DORADO_SCRIPTS[step])), values)
         header = format_pbs_header(f"{args.jobName}_{step}",
                                    getattr(args, f"{step}Walltime"),
                                    getattr(args, f"{step}Mem"),
