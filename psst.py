@@ -39,7 +39,7 @@ from modules.validation import \
         validate_m_index, \
             validate_m_index_bwa, validate_m_index_salmon, validate_m_index_star, \
         validate_m_rna, \
-            validate_m_rna_salmon, \
+            validate_m_rna_salmon, validate_m_rna_star, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
@@ -47,7 +47,7 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon
+from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
     THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
@@ -1118,6 +1118,40 @@ def main():
     add_pbs_arguments(mrnasalmonparser, jobName="salmon_quant",
                       walltime="04:00:00", mem="15G", cpus=5)
     
+    # Map > rna > star mode
+    mrnastarparser = subMapRnaParsers.add_parser("star",
+                                                 parents=[p],
+                                                 add_help=False,
+                                                 help="""Map RNAseq reads to a genome with STAR, producing sorted
+                                                 BAMs and gene counts (an array job with one subjob per sample)""")
+    mrnastarparser.set_defaults(func=map_rna_star, scriptSuffix="star_align")
+    mrnastarparser.add_argument("-i", "--index", dest="indexDir",
+                                required=False,
+                                action=UserSet,
+                                help="""Optionally, specify the STAR index directory (see 'map index
+                                star'); default == left as a placeholder""",
+                                default=None)
+    add_reads_arguments(mrnastarparser, allowSingleEnd=True)
+    mrnastarparser.add_argument("--outdir", dest="outputDir",
+                                required=False,
+                                help="""Optionally, specify the output directory, relative to the directory
+                                the job is submitted from, which will contain a subdirectory for each
+                                sample; default == '%(default)s'""",
+                                default="star")
+    mrnastarparser.add_argument("--twopass", dest="twopass",
+                                required=False,
+                                action="store_true",
+                                help="""Optionally, use STAR's two-pass mode, which re-maps each sample
+                                using the novel splice junctions found in its first pass""",
+                                default=False)
+    mrnastarparser.add_argument("--module", dest="starModule",
+                                required=False,
+                                help="""Optionally, specify the STAR module to load;
+                                default == '%(default)s'""",
+                                default=STAR_MODULE)
+    add_pbs_arguments(mrnastarparser, jobName="star_align",
+                      walltime="04:00:00", mem="20G", cpus=4)
+    
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
@@ -1241,6 +1275,9 @@ def mmain(args):
         if args.mapRnaMode == "salmon":
             print("## salmon RNAseq quantification ##")
             validate_m_rna_salmon(args)
+        if args.mapRnaMode == "star":
+            print("## STAR RNAseq mapping ##")
+            validate_m_rna_star(args)
 
 if __name__ == "__main__":
     main()

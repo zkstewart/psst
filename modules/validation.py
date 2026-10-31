@@ -687,6 +687,34 @@ def validate_m_rna_salmon(args):
     if args.bootstraps < 0:
         raise ValueError("--bootstraps must be >= 0")
 
+def validate_m_rna_star(args):
+    '''
+    Validation for arguments used in "map rna star" mode. If a reads directory was
+    given, its samples are counted to determine the array job size.
+    '''
+    if re.match(r"^\S+$", args.starModule) == None:
+        raise FormatError(f"--module '{args.starModule}' must be non-empty and not contain whitespace")
+    
+    # Validate the STAR index, which may be built by a job this one depends on
+    if "indexDir" in args.userSet:
+        args.indexDir = os.path.abspath(args.indexDir)
+        if not os.path.isfile(os.path.join(args.indexDir, "SAindex")) and args.afterok:
+            print(f"WARNING: STAR index (-i {args.indexDir}) does not exist yet; " +
+                  "the --afterok job(s) must build it")
+        elif not os.path.isfile(os.path.join(args.indexDir, "SAindex")):
+            raise FileNotFoundError(f"STAR index (-i {args.indexDir}) does not exist or is incomplete!")
+    
+    # Validate reads and count samples
+    samples = validate_reads(args, args.singleEnd)
+    args.numSamples = None
+    if samples != None:
+        args.numSamples = len(samples)
+        print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to map")
+    
+    # Validate behavioural parameters
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+
 def validate_ratio(value, flag):
     '''
     Parameters:

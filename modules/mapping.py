@@ -144,3 +144,25 @@ def map_index_star(args):
         "cpus": args.cpus,
         "ramLimit": args.ramLimit
     })
+
+def map_rna_star(args):
+    '''
+    Generates (and optionally submits) a PBS array job script which maps RNAseq reads
+    to a genome with STAR, producing a coordinate-sorted BAM, a transcriptome BAM and
+    per-gene read counts. Each subjob maps one sample; the array size is a placeholder
+    if no reads directory was given, and no array is requested if there is only one
+    sample.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map rna star" arguments.
+    '''
+    finalise_job(args, "map/run_star_align.sh", {
+        "starModule": args.starModule,
+        "indexDir": args.indexDir,
+        "readsDir": args.readsDir,
+        "readsSuffix": args.readsSuffix,
+        "paired": "false" if args.singleEnd else "true",
+        "outputDir": args.outputDir,
+        "twopass": "true" if args.twopass else "false",
+        "cpus": args.cpus
+    }, arraySize=get_array_size(args.numSamples))
