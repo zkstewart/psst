@@ -35,7 +35,7 @@ from modules.validation import \
     validate_cl, \
         validate_cl_mmseqs2, validate_cl_cdhit, \
     validate_m, \
-        validate_m_wgs, \
+        validate_m_wgs, validate_m_hic, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
@@ -43,8 +43,9 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.mapping import map_wgs
+from modules.mapping import map_wgs, map_hic
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
@@ -325,6 +326,31 @@ def add_genscripts_argument(parser):
                         help="""Optionally, specify the location of the Genome_analysis_scripts
                         repository; default == '%(default)s'""",
                         default=GENSCRIPT_DIR)
+
+def add_bwa_arguments(parser):
+    '''
+    Adds reference genome and reads arguments to a leaf subparser for "map" modes which
+    run bwa mem.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+    '''
+    parser.add_argument("-r", "--reference", dest="genome",
+                        required=False,
+                        action=UserSet,
+                        help="""Optionally, specify the location of the reference genome FASTA file,
+                        which must be indexed with 'bwa index'; default == left as a placeholder""",
+                        default=None)
+    parser.add_argument("-d", "--readsdir", dest="readsDir",
+                        required=False,
+                        help="""Optionally, specify the directory containing the read files; if given,
+                        read files are located and pairs checked; default == left as a placeholder""",
+                        default=None)
+    parser.add_argument("-rs", "--suffix", dest="readsSuffix",
+                        required=False,
+                        help="""Optionally, specify the suffix which identifies read files, where the
+                        character before it is 1 or 2 for paired reads; default == '%(default)s'""",
+                        default=".fq.gz")
 
 def add_preset_arguments(parser):
     '''
@@ -836,23 +862,7 @@ def main():
                                           help="""Map Illumina DNA reads with bwa mem, then sort and mark
                                           duplicates (an array job with one subjob per sample)""")
     mwgsparser.set_defaults(func=map_wgs, scriptSuffix="map_wgs")
-    mwgsparser.add_argument("-r", "--reference", dest="genome",
-                            required=False,
-                            action=UserSet,
-                            help="""Optionally, specify the location of the reference genome FASTA file,
-                            which must be indexed with 'bwa index'; default == left as a placeholder""",
-                            default=None)
-    mwgsparser.add_argument("-d", "--readsdir", dest="readsDir",
-                            required=False,
-                            help="""Optionally, specify the directory containing the read files; if given,
-                            reads are checked and counted to size the array job; default == left as
-                            a placeholder""",
-                            default=None)
-    mwgsparser.add_argument("-rs", "--suffix", dest="readsSuffix",
-                            required=False,
-                            help="""Optionally, specify the suffix which identifies read files, where the
-                            character before it is 1 or 2 for paired reads; default == '%(default)s'""",
-                            default=".fq.gz")
+    add_bwa_arguments(mwgsparser)
     mwgsparser.add_argument("--singleEnd", dest="singleEnd",
                             required=False,
                             action="store_true",
@@ -875,6 +885,49 @@ def main():
                             default="3G")
     add_pbs_arguments(mwgsparser, jobName="map_wgs",
                       walltime="24:00:00", mem="55G", cpus=8)
+    
+    # Map > hic mode
+    mhicparser = subMapParsers.add_parser("hic",
+                                          parents=[p],
+                                          add_help=False,
+                                          help="""Map Hi-C reads with bwa mem, then deduplicate contacts with
+                                          pairtools and build a .hic file with 3D-DNA""")
+    mhicparser.set_defaults(func=map_hic, scriptSuffix="map_hic")
+    add_bwa_arguments(mhicparser)
+    mhicparser.add_argument("-p", "--prefix", dest="prefix",
+                            required=False,
+                            help="""Optionally, specify the prefix for output files; default == the
+                            reference genome file name without its extension if -r is given,
+                            otherwise left as a placeholder""",
+                            default=None)
+    mhicparser.add_argument("--outdir", dest="outputDir",
+                            required=False,
+                            help="""Optionally, specify the output directory, relative to the
+                            directory the job is submitted from; default == '%(default)s'""",
+                            default="hic")
+    mhicparser.add_argument("--mapq", dest="mapq",
+                            required=False,
+                            type=int,
+                            help="""Optionally, specify the minimum MAPQ of both reads for a contact
+                            to be included in the .hic file; default == %(default)s""",
+                            default=1)
+    mhicparser.add_argument("--sort-mem", dest="sortMem",
+                            required=False,
+                            help="""Optionally, specify the memory for pairtools sort, which should
+                            be well below --mem; default == '%(default)s'""",
+                            default="20G")
+    mhicparser.add_argument("--conda", dest="condaEnv",
+                            required=False,
+                            help="""Optionally, specify the conda environment containing pairtools;
+                            default == '%(default)s'""",
+                            default=PAIRTOOLS_CONDA_ENV)
+    mhicparser.add_argument("--3ddna", dest="threeddnaDir",
+                            required=False,
+                            action=UserSet,
+                            help="""Optionally, specify the 3D-DNA directory; default == '%(default)s'""",
+                            default=THREEDDNA_DIR)
+    add_pbs_arguments(mhicparser, jobName="map_hic",
+                      walltime="48:00:00", mem="80G", cpus=16)
     
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
@@ -980,6 +1033,9 @@ def mmain(args):
     if args.mapMode == "wgs":
         print("## bwa mem WGS read mapping ##")
         validate_m_wgs(args)
+    if args.mapMode == "hic":
+        print("## bwa mem Hi-C read mapping and .hic generation ##")
+        validate_m_hic(args)
 
 if __name__ == "__main__":
     main()

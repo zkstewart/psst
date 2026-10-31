@@ -29,6 +29,8 @@ DORADO_DIR = CONFIG["programs"]["dorado_dir"]
 BASESPACE_DIR = CONFIG["programs"]["basespace_dir"]
 CDHIT_DIR = CONFIG["programs"]["cdhit_dir"]
 PAF2DOTPLOT_DIR = CONFIG["programs"]["paf2dotplot_dir"]
+THREEDDNA_DIR = CONFIG["programs"]["threeddna_dir"]
+PAIRTOOLS_CONDA_ENV = CONFIG["programs"]["pairtools_conda_env"]
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = CONFIG["databases"]["refseq_plant_fasta"]

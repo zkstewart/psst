@@ -441,10 +441,18 @@ def validate_m(args):
     '''
     pass # no specific validation needed for this mode
 
-def validate_m_wgs(args):
+def validate_bwa_inputs(args, singleEnd):
     '''
-    Validation for arguments used in "map wgs" mode. If a reads directory was given,
-    its read files are located (and pairs checked) to determine the array job size.
+    Validation for the reference genome and reads arguments shared by "map" modes which
+    run bwa mem (i.e., those added by add_bwa_arguments() in psst.py). If a reads
+    directory was given, its read files are located and pairs checked.
+    
+    Parameters:
+        args -- an argparse.Namespace containing bwa input arguments.
+        singleEnd -- a boolean indicating whether reads are single-end rather than paired.
+    Returns:
+        samples -- a list of samples as returned by get_read_files(), or None if no
+                   reads directory was given.
     '''
     # Validate the reference genome and its bwa index
     validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
@@ -454,15 +462,32 @@ def validate_m_wgs(args):
                 raise FileNotFoundError(f"Reference genome (-r {args.genome}) is not indexed; " +
                                         f"run 'bwa index' on it first ({args.genome}{indexSuffix} not found)")
     
-    # Validate reads and count samples
+    # Validate reads
     if args.readsSuffix == "":
         raise ValueError("-rs must be given a non-empty value")
+    if args.readsDir == None:
+        return None
+    args.readsDir = os.path.abspath(args.readsDir)
+    if not os.path.isdir(args.readsDir):
+        raise DirectoryNotFoundError(f"Reads directory (-d {args.readsDir}) does not exist!")
+    return get_read_files(args.readsDir, args.readsSuffix, singleEnd)
+
+def validate_sort_mem(sortMem):
+    '''
+    Parameters:
+        sortMem -- a string of the memory to give a sort command (e.g., '2G').
+    '''
+    if re.match(r"^\d+[KMG]$", sortMem) == None:
+        raise FormatError(f"--sort-mem '{sortMem}' must be in the format '<number>K/M/G' (e.g., '2G')")
+
+def validate_m_wgs(args):
+    '''
+    Validation for arguments used in "map wgs" mode. If a reads directory was given,
+    its samples are counted to determine the array job size.
+    '''
+    samples = validate_bwa_inputs(args, args.singleEnd)
     args.numSamples = None
-    if args.readsDir != None:
-        args.readsDir = os.path.abspath(args.readsDir)
-        if not os.path.isdir(args.readsDir):
-            raise DirectoryNotFoundError(f"Reads directory (-d {args.readsDir}) does not exist!")
-        samples = get_read_files(args.readsDir, args.readsSuffix, args.singleEnd)
+    if samples != None:
         args.numSamples = len(samples)
         print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to map")
     
@@ -471,8 +496,37 @@ def validate_m_wgs(args):
         raise ValueError("--outdir must be given a non-empty value")
     if re.match(r"^[^\s@]+$", args.library) == None:
         raise FormatError(f"--library '{args.library}' must be non-empty and not contain whitespace or '@'")
-    if re.match(r"^\d+[KMG]$", args.sortMem) == None:
-        raise FormatError(f"--sort-mem '{args.sortMem}' must be in the format '<number>K/M/G' (e.g., '2G')")
+    validate_sort_mem(args.sortMem)
+
+def validate_m_hic(args):
+    '''
+    Validation for arguments used in "map hic" mode.
+    '''
+    samples = validate_bwa_inputs(args, False)
+    if samples != None:
+        print(f"Found {len(samples)} read pair(s) to map as one Hi-C library")
+    validate_program_dir(args, "threeddnaDir", os.path.join("visualize", "run-assembly-visualizer.sh"), "--3ddna")
+    
+    # Validate the output prefix, derived from the reference genome if not given
+    if args.prefix == None and args.genome != None:
+        args.prefix = re.sub(r"\.(fasta|fa|fna|fas)$", "", os.path.basename(args.genome), flags=re.IGNORECASE)
+    if args.prefix != None and re.match(r"^[^\s/]+$", args.prefix) == None:
+        raise FormatError(f"-p '{args.prefix}' must not contain whitespace or '/'")
+    
+    # Validate behavioural parameters
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if args.mapq < 0:
+        raise ValueError("--mapq must be >= 0")
+    if re.match(r"^\S+$", args.condaEnv) == None:
+        raise FormatError(f"--conda '{args.condaEnv}' must be non-empty and not contain whitespace")
+    validate_sort_mem(args.sortMem)
+    
+    # 3D-DNA's juicebox_tools.sh requests a fixed 48 GB Java heap
+    match = re.match(r"^(\d+)([kmgt]?)b?$", args.mem, re.IGNORECASE)
+    memGB = int(match.group(1)) / {"": 1024**3, "k": 1024**2, "m": 1024, "g": 1, "t": 1/1024}[match.group(2).lower()]
+    if memGB < 56:
+        print(f"WARNING: --mem {args.mem} is likely too little for 3D-DNA, which runs Java with a 48 GB heap")
 
 def validate_ratio(value, flag):
     '''

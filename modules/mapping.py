@@ -37,3 +37,25 @@ def map_wgs(args):
         "cpus": args.cpus,
         "sortMem": args.sortMem
     }, arraySize=arraySize)
+
+def map_hic(args):
+    '''
+    Generates (and optionally submits) a PBS job script which maps Hi-C reads with
+    bwa mem -5SP, parses, sorts and deduplicates contacts with pairtools, then builds
+    a .hic file with 3D-DNA for viewing (and editing) in Juicebox.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map hic" arguments.
+    '''
+    finalise_job(args, "map/run_bwa_hic.sh", {
+        "condaEnv": args.condaEnv,
+        "threeddnaDir": args.threeddnaDir,
+        "genome": args.genome,
+        "readsDir": args.readsDir,
+        "readsSuffix": args.readsSuffix,
+        "outputDir": args.outputDir,
+        "prefix": args.prefix,
+        "mapq": args.mapq,
+        "cpus": args.cpus,
+        "sortMem": args.sortMem
+    })
