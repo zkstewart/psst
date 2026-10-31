@@ -9,7 +9,8 @@
         "cdhit_dir": "/home/stewarz2/various_programs/cdhit-4.8.1",
         "paf2dotplot_dir": "/home/stewarz2/various_programs/paf2dotplot",
         "threeddna_dir": "/home/stewarz2/various_programs/3d-dna",
-        "pairtools_conda_env": "hic"
+        "pairtools_conda_env": "hic",
+        "salmon_dir": "/home/stewarz2/anaconda3/bin"
     },
     "databases": {
         "refseq_plant_fasta": "/home/stewarz2/various_programs/refseq_db/refseq_plant.protein.faa",

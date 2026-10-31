@@ -74,3 +74,21 @@ def map_index_bwa(args):
     finalise_job(args, "map/run_bwa_index.sh", {
         "genome": args.genome
     })
+
+def map_index_salmon(args):
+    '''
+    Generates (and optionally submits) a PBS job script which indexes a transcripts
+    FASTA file with salmon index, optionally with the genome as decoys.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map index salmon" arguments.
+    '''
+    finalise_job(args, "map/run_salmon_index.sh", {
+        "salmonDir": args.salmonDir,
+        "transcripts": args.transcripts,
+        "genome": args.genome if args.genome != None else "", # empty means no decoys
+        "indexDir": args.indexDir,
+        "kmer": args.kmer,
+        "ramLimit": args.ramLimit,
+        "cpus": args.cpus
+    })

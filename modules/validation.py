@@ -47,6 +47,16 @@ def parse_walltime(walltime):
         raise FormatError(f"--walltime '{walltime}' has minutes or seconds >= 60")
     return hours, minutes, seconds
 
+def parse_mem_gb(mem):
+    '''
+    Parameters:
+        mem -- a string of a validated PBS memory value (e.g., '70G' or '70gb').
+    Returns:
+        memGB -- a float of the memory in gigabytes (GiB).
+    '''
+    match = re.match(r"^(\d+)([kmgt]?)b?$", mem, re.IGNORECASE)
+    return int(match.group(1)) / {"": 1024**3, "k": 1024**2, "m": 1024, "g": 1, "t": 1/1024}[match.group(2).lower()]
+
 def validate_rpid(rpid):
     '''
     Parameters:
@@ -528,9 +538,8 @@ def validate_m_hic(args):
     validate_sort_mem(args.sortMem)
     
     # 3D-DNA's juicebox_tools.sh requests a fixed 48 GB Java heap
-    match = re.match(r"^(\d+)([kmgt]?)b?$", args.mem, re.IGNORECASE)
-    memGB = int(match.group(1)) / {"": 1024**3, "k": 1024**2, "m": 1024, "g": 1, "t": 1/1024}[match.group(2).lower()]
-    if memGB < 56:
+    args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
+    if parse_mem_gb(args.mem) < 56:
         print(f"WARNING: --mem {args.mem} is likely too little for 3D-DNA, which runs Java with a 48 GB heap")
 
 def validate_m_index(args):
@@ -549,6 +558,38 @@ def validate_m_index_bwa(args):
         if existing != []:
             raise FileExistsError(f"Reference genome (-r {args.genome}) is already indexed; " +
                                   f"remove the existing index files (e.g., {existing[0]}) to rebuild it")
+
+def validate_m_index_salmon(args):
+    '''
+    Validation for arguments used in "map index salmon" mode.
+    '''
+    validate_program_dir(args, "salmonDir", "salmon", "--salmon")
+    validate_input_file(args, "transcripts", "-t", "Transcripts FASTA file")
+    validate_input_file(args, "genome", "--genome", "Decoy genome FASTA file")
+    
+    # Validate the index directory, derived from the transcripts file if not given
+    if args.indexDir == None and args.transcripts != None:
+        args.indexDir = f"{args.transcripts}_salmon_index"
+    if args.indexDir != None:
+        args.indexDir = os.path.abspath(args.indexDir)
+        if os.path.exists(args.indexDir):
+            raise FileExistsError(f"Salmon index (-o {args.indexDir}) already exists!")
+        if not os.path.isdir(os.path.dirname(args.indexDir)):
+            raise DirectoryNotFoundError(f"Salmon index (-o {args.indexDir}) is in a directory that does not exist!")
+    
+    # Validate parameters; salmon requires an odd k-mer length no greater than 31
+    if args.kmer < 1 or args.kmer > 31 or args.kmer % 2 == 0:
+        raise ValueError("--kmer must be an odd number from 1 to 31")
+    
+    # Validate the RAM limit, which salmon otherwise sizes from the whole node's memory
+    args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
+    memGB = parse_mem_gb(args.mem)
+    if args.ramLimit == None:
+        args.ramLimit = max(1, int(memGB * 0.75))
+    if args.ramLimit < 1:
+        raise ValueError("--ram-limit must be >= 1")
+    if args.ramLimit >= memGB:
+        raise ValueError(f"--ram-limit {args.ramLimit} must be less than --mem {args.mem}")
 
 def validate_ratio(value, flag):
     '''

@@ -37,7 +37,7 @@ from modules.validation import \
     validate_m, \
         validate_m_wgs, validate_m_hic, \
         validate_m_index, \
-            validate_m_index_bwa, \
+            validate_m_index_bwa, validate_m_index_salmon, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
@@ -45,9 +45,9 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.mapping import map_wgs, map_hic, map_index_bwa
+from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
@@ -956,6 +956,52 @@ def main():
     add_pbs_arguments(mindexbwaparser, jobName="bwa_index",
                       walltime="03:00:00", mem="30G", cpus=1)
     
+    # Map > index > salmon mode
+    mindexsalmonparser = subMapIndexParsers.add_parser("salmon",
+                                                       parents=[p],
+                                                       add_help=False,
+                                                       help="Index a transcripts FASTA file with salmon index")
+    mindexsalmonparser.set_defaults(func=map_index_salmon, scriptSuffix="salmon_index")
+    mindexsalmonparser.add_argument("-t", "--transcripts", dest="transcripts",
+                                    required=False,
+                                    action=UserSet,
+                                    help="""Optionally, specify the location of the transcripts FASTA file
+                                    to index; default == left as a placeholder""",
+                                    default=None)
+    mindexsalmonparser.add_argument("--genome", dest="genome",
+                                    required=False,
+                                    action=UserSet,
+                                    help="""Optionally, specify the genome FASTA file to build a decoy-aware
+                                    index, which reduces false mappings from unannotated genomic sequence
+                                    (recommended); default == no decoys""",
+                                    default=None)
+    mindexsalmonparser.add_argument("-o", "--index", dest="indexDir",
+                                    required=False,
+                                    help="""Optionally, specify the index directory to create; default ==
+                                    '<transcripts>_salmon_index' if -t is given, otherwise left as a
+                                    placeholder""",
+                                    default=None)
+    mindexsalmonparser.add_argument("-k", "--kmer", dest="kmer",
+                                    required=False,
+                                    type=int,
+                                    help="""Optionally, specify the k-mer length, which must be odd; consider
+                                    lowering it for reads shorter than 75 bp; default == %(default)s""",
+                                    default=31)
+    mindexsalmonparser.add_argument("--ram-limit", dest="ramLimit",
+                                    required=False,
+                                    type=int,
+                                    help="""Optionally, specify the RAM limit (in GiB) for salmon's index
+                                    building, which must be less than --mem; default == 75%% of --mem""",
+                                    default=None)
+    mindexsalmonparser.add_argument("--salmon", dest="salmonDir",
+                                    required=False,
+                                    action=UserSet,
+                                    help="""Optionally, specify the directory containing the salmon executable;
+                                    default == '%(default)s'""",
+                                    default=SALMON_DIR)
+    add_pbs_arguments(mindexsalmonparser, jobName="salmon_index",
+                      walltime="24:00:00", mem="65G", cpus=8)
+    
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
@@ -1068,6 +1114,9 @@ def mmain(args):
         if args.mapIndexMode == "bwa":
             print("## bwa reference indexing ##")
             validate_m_index_bwa(args)
+        if args.mapIndexMode == "salmon":
+            print("## salmon transcriptome indexing ##")
+            validate_m_index_salmon(args)
 
 if __name__ == "__main__":
     main()
