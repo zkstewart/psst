@@ -32,6 +32,7 @@ PAF2DOTPLOT_DIR = CONFIG["programs"]["paf2dotplot_dir"]
 THREEDDNA_DIR = CONFIG["programs"]["threeddna_dir"]
 PAIRTOOLS_CONDA_ENV = CONFIG["programs"]["pairtools_conda_env"]
 SALMON_DIR = CONFIG["programs"]["salmon_dir"]
+STAR_MODULE = CONFIG["programs"]["star_module"]
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = CONFIG["databases"]["refseq_plant_fasta"]

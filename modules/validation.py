@@ -602,6 +602,40 @@ def validate_m_index_salmon(args):
     if args.ramLimit >= memGB:
         raise ValueError(f"--ram-limit {args.ramLimit} must be less than --mem {args.mem}")
 
+def validate_m_index_star(args):
+    '''
+    Validation for arguments used in "map index star" mode.
+    '''
+    # Validate input files, which STAR cannot read if compressed
+    validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
+    validate_input_file(args, "gtf", "--gtf", "Gene annotation GTF file")
+    for flag, fileName in [("-r", args.genome), ("--gtf", args.gtf)]:
+        if fileName != None and fileName.endswith(".gz"):
+            raise ValueError(f"{flag} {fileName} must be uncompressed for STAR")
+    if args.gtf != None and re.search(r"\.gff3?$", args.gtf, re.IGNORECASE) != None:
+        raise ValueError(f"--gtf {args.gtf} appears to be a GFF3; convert it to GTF first " +
+                         "(e.g., agat_convert_sp_gff2gtf.pl --gff input.gff3 -o output.gtf)")
+    
+    # Validate the index directory, derived from the genome file if not given
+    if args.indexDir == None and args.genome != None:
+        args.indexDir = f"{args.genome}_STAR_index"
+    if args.indexDir != None:
+        args.indexDir = os.path.abspath(args.indexDir)
+        if os.path.exists(args.indexDir):
+            raise FileExistsError(f"STAR index (-o {args.indexDir}) already exists!")
+        if not os.path.isdir(os.path.dirname(args.indexDir)):
+            raise DirectoryNotFoundError(f"STAR index (-o {args.indexDir}) is in a directory that does not exist!")
+    
+    # Validate parameters
+    if args.overhang < 1:
+        raise ValueError("--overhang must be >= 1")
+    if re.match(r"^\S+$", args.starModule) == None:
+        raise FormatError(f"--module '{args.starModule}' must be non-empty and not contain whitespace")
+    
+    # Set STAR's RAM limit from --mem, leaving headroom for the rest of the process
+    args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
+    args.ramLimit = int(parse_mem_gb(args.mem) * 0.9 * 1024**3)
+
 def validate_m_rna(args):
     '''
     Validation for arguments common to all "map rna" mode commands.

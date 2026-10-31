@@ -126,3 +126,21 @@ def map_rna_salmon(args):
         "bootstraps": args.bootstraps,
         "cpus": args.cpus
     }, arraySize=get_array_size(args.numSamples))
+
+def map_index_star(args):
+    '''
+    Generates (and optionally submits) a PBS job script which indexes a reference
+    genome FASTA file and its GTF annotation with STAR genomeGenerate.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map index star" arguments.
+    '''
+    finalise_job(args, "map/run_star_index.sh", {
+        "starModule": args.starModule,
+        "genome": args.genome,
+        "gtf": args.gtf,
+        "indexDir": args.indexDir,
+        "overhang": args.overhang,
+        "cpus": args.cpus,
+        "ramLimit": args.ramLimit
+    })

@@ -37,7 +37,7 @@ from modules.validation import \
     validate_m, \
         validate_m_wgs, validate_m_hic, \
         validate_m_index, \
-            validate_m_index_bwa, validate_m_index_salmon, \
+            validate_m_index_bwa, validate_m_index_salmon, validate_m_index_star, \
         validate_m_rna, \
             validate_m_rna_salmon, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
@@ -47,9 +47,9 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon, map_rna_salmon
+from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
@@ -1016,6 +1016,45 @@ def main():
     add_pbs_arguments(mindexsalmonparser, jobName="salmon_index",
                       walltime="24:00:00", mem="65G", cpus=8)
     
+    # Map > index > star mode
+    mindexstarparser = subMapIndexParsers.add_parser("star",
+                                                     parents=[p],
+                                                     add_help=False,
+                                                     help="Index a reference genome FASTA and GTF annotation with STAR")
+    mindexstarparser.set_defaults(func=map_index_star, scriptSuffix="star_index")
+    mindexstarparser.add_argument("-r", "--reference", dest="genome",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify the location of the (uncompressed) reference
+                                  genome FASTA file to index; default == left as a placeholder""",
+                                  default=None)
+    mindexstarparser.add_argument("--gtf", dest="gtf",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify the location of the (uncompressed) gene
+                                  annotation GTF file; convert GFF3 files to GTF first; default == left
+                                  as a placeholder""",
+                                  default=None)
+    mindexstarparser.add_argument("-o", "--index", dest="indexDir",
+                                  required=False,
+                                  help="""Optionally, specify the index directory to create; default ==
+                                  '<reference>_STAR_index' if -r is given, otherwise left as a
+                                  placeholder""",
+                                  default=None)
+    mindexstarparser.add_argument("--overhang", dest="overhang",
+                                  required=False,
+                                  type=int,
+                                  help="""Optionally, specify the splice junction overhang, which should
+                                  ideally be the read length minus 1; default == %(default)s""",
+                                  default=100)
+    mindexstarparser.add_argument("--module", dest="starModule",
+                                  required=False,
+                                  help="""Optionally, specify the STAR module to load;
+                                  default == '%(default)s'""",
+                                  default=STAR_MODULE)
+    add_pbs_arguments(mindexstarparser, jobName="star_index",
+                      walltime="04:00:00", mem="50G", cpus=8)
+    
     # Map > rna subparser
     mrnaparser = subMapParsers.add_parser("rna",
                                           parents=[p],
@@ -1194,6 +1233,9 @@ def mmain(args):
         if args.mapIndexMode == "salmon":
             print("## salmon transcriptome indexing ##")
             validate_m_index_salmon(args)
+        if args.mapIndexMode == "star":
+            print("## STAR genome indexing ##")
+            validate_m_index_star(args)
     if args.mapMode == "rna":
         validate_m_rna(args)
         if args.mapRnaMode == "salmon":
