@@ -13,6 +13,9 @@
 
 from .pbs import finalise_job
 
+# Files written alongside a FASTA file by 'bwa index'
+BWA_INDEX_SUFFIXES = [".amb", ".ann", ".bwt", ".pac", ".sa"]
+
 def map_wgs(args):
     '''
     Generates (and optionally submits) a PBS array job script which maps short DNA reads
@@ -58,4 +61,16 @@ def map_hic(args):
         "mapq": args.mapq,
         "cpus": args.cpus,
         "sortMem": args.sortMem
+    })
+
+def map_index_bwa(args):
+    '''
+    Generates (and optionally submits) a PBS job script which indexes a reference
+    genome FASTA file with bwa index, writing index files alongside it.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map index bwa" arguments.
+    '''
+    finalise_job(args, "map/run_bwa_index.sh", {
+        "genome": args.genome
     })

@@ -36,6 +36,8 @@ from modules.validation import \
         validate_cl_mmseqs2, validate_cl_cdhit, \
     validate_m, \
         validate_m_wgs, validate_m_hic, \
+        validate_m_index, \
+            validate_m_index_bwa, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
@@ -43,7 +45,7 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.mapping import map_wgs, map_hic
+from modules.mapping import map_wgs, map_hic, map_index_bwa
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
     THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
@@ -929,6 +931,31 @@ def main():
     add_pbs_arguments(mhicparser, jobName="map_hic",
                       walltime="48:00:00", mem="80G", cpus=16)
     
+    # Map > index subparser
+    mindexparser = subMapParsers.add_parser("index",
+                                            parents=[p],
+                                            add_help=False,
+                                            help="Index a reference for read mapping")
+    
+    subMapIndexParsers = mindexparser.add_subparsers(dest="mapIndexMode",
+                                                     required=True)
+    
+    # Map > index > bwa mode
+    mindexbwaparser = subMapIndexParsers.add_parser("bwa",
+                                                    parents=[p],
+                                                    add_help=False,
+                                                    help="Index a reference genome FASTA file with bwa index")
+    mindexbwaparser.set_defaults(func=map_index_bwa, scriptSuffix="bwa_index")
+    mindexbwaparser.add_argument("-r", "--reference", dest="genome",
+                                 required=False,
+                                 action=UserSet,
+                                 help="""Optionally, specify the location of the reference genome FASTA file
+                                 to index; index files are written alongside it; default == left as a
+                                 placeholder""",
+                                 default=None)
+    add_pbs_arguments(mindexbwaparser, jobName="bwa_index",
+                      walltime="03:00:00", mem="30G", cpus=1)
+    
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
@@ -1036,6 +1063,11 @@ def mmain(args):
     if args.mapMode == "hic":
         print("## bwa mem Hi-C read mapping and .hic generation ##")
         validate_m_hic(args)
+    if args.mapMode == "index":
+        validate_m_index(args)
+        if args.mapIndexMode == "bwa":
+            print("## bwa reference indexing ##")
+            validate_m_index_bwa(args)
 
 if __name__ == "__main__":
     main()

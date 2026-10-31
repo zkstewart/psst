@@ -14,6 +14,7 @@
 import os, re, shutil
 
 from .basecalling import DORADO_SCRIPTS
+from .mapping import BWA_INDEX_SUFFIXES
 from .config import CONFIG, RPID_REGEX
 from .reads import get_read_files
 
@@ -454,13 +455,17 @@ def validate_bwa_inputs(args, singleEnd):
         samples -- a list of samples as returned by get_read_files(), or None if no
                    reads directory was given.
     '''
-    # Validate the reference genome and its bwa index
+    # Validate the reference genome and its bwa index, which may be built by a job
+    # this one depends on
     validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
     if "genome" in args.userSet:
-        for indexSuffix in [".amb", ".ann", ".bwt", ".pac", ".sa"]:
-            if not os.path.isfile(args.genome + indexSuffix):
-                raise FileNotFoundError(f"Reference genome (-r {args.genome}) is not indexed; " +
-                                        f"run 'bwa index' on it first ({args.genome}{indexSuffix} not found)")
+        missing = [ s for s in BWA_INDEX_SUFFIXES if not os.path.isfile(args.genome + s) ]
+        if missing != [] and args.afterok:
+            print(f"WARNING: reference genome (-r {args.genome}) is not indexed yet; " +
+                  "the --afterok job(s) must index it")
+        elif missing != []:
+            raise FileNotFoundError(f"Reference genome (-r {args.genome}) is not indexed; " +
+                                    f"run 'bwa index' on it first ({args.genome}{missing[0]} not found)")
     
     # Validate reads
     if args.readsSuffix == "":
@@ -527,6 +532,23 @@ def validate_m_hic(args):
     memGB = int(match.group(1)) / {"": 1024**3, "k": 1024**2, "m": 1024, "g": 1, "t": 1/1024}[match.group(2).lower()]
     if memGB < 56:
         print(f"WARNING: --mem {args.mem} is likely too little for 3D-DNA, which runs Java with a 48 GB heap")
+
+def validate_m_index(args):
+    '''
+    Validation for arguments common to all "map index" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_m_index_bwa(args):
+    '''
+    Validation for arguments used in "map index bwa" mode.
+    '''
+    validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
+    if "genome" in args.userSet:
+        existing = [ args.genome + s for s in BWA_INDEX_SUFFIXES if os.path.exists(args.genome + s) ]
+        if existing != []:
+            raise FileExistsError(f"Reference genome (-r {args.genome}) is already indexed; " +
+                                  f"remove the existing index files (e.g., {existing[0]}) to rebuild it")
 
 def validate_ratio(value, flag):
     '''
