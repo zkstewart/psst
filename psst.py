@@ -38,6 +38,8 @@ from modules.validation import \
         validate_m_wgs, validate_m_hic, \
         validate_m_index, \
             validate_m_index_bwa, validate_m_index_salmon, \
+        validate_m_rna, \
+            validate_m_rna_salmon, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
@@ -45,7 +47,7 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon
+from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon, map_rna_salmon
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
     THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
@@ -329,13 +331,14 @@ def add_genscripts_argument(parser):
                         repository; default == '%(default)s'""",
                         default=GENSCRIPT_DIR)
 
-def add_bwa_arguments(parser):
+def add_bwa_arguments(parser, allowSingleEnd):
     '''
     Adds reference genome and reads arguments to a leaf subparser for "map" modes which
     run bwa mem.
     
     Parameters:
         parser -- an argparse.ArgumentParser to add arguments to.
+        allowSingleEnd -- a boolean indicating whether the mode accepts single-end reads.
     '''
     parser.add_argument("-r", "--reference", dest="genome",
                         required=False,
@@ -343,6 +346,16 @@ def add_bwa_arguments(parser):
                         help="""Optionally, specify the location of the reference genome FASTA file,
                         which must be indexed with 'bwa index'; default == left as a placeholder""",
                         default=None)
+    add_reads_arguments(parser, allowSingleEnd)
+
+def add_reads_arguments(parser, allowSingleEnd):
+    '''
+    Adds reads arguments to a leaf subparser for "map" modes.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+        allowSingleEnd -- a boolean indicating whether the mode accepts single-end reads.
+    '''
     parser.add_argument("-d", "--readsdir", dest="readsDir",
                         required=False,
                         help="""Optionally, specify the directory containing the read files; if given,
@@ -353,6 +366,12 @@ def add_bwa_arguments(parser):
                         help="""Optionally, specify the suffix which identifies read files, where the
                         character before it is 1 or 2 for paired reads; default == '%(default)s'""",
                         default=".fq.gz")
+    if allowSingleEnd:
+        parser.add_argument("--singleEnd", dest="singleEnd",
+                            required=False,
+                            action="store_true",
+                            help="""Optionally, indicate that reads are single-end rather than paired""",
+                            default=False)
 
 def add_preset_arguments(parser):
     '''
@@ -864,12 +883,7 @@ def main():
                                           help="""Map Illumina DNA reads with bwa mem, then sort and mark
                                           duplicates (an array job with one subjob per sample)""")
     mwgsparser.set_defaults(func=map_wgs, scriptSuffix="map_wgs")
-    add_bwa_arguments(mwgsparser)
-    mwgsparser.add_argument("--singleEnd", dest="singleEnd",
-                            required=False,
-                            action="store_true",
-                            help="""Optionally, indicate that reads are single-end rather than paired""",
-                            default=False)
+    add_bwa_arguments(mwgsparser, allowSingleEnd=True)
     mwgsparser.add_argument("--outdir", dest="outputDir",
                             required=False,
                             help="""Optionally, specify the output directory, relative to the
@@ -895,7 +909,7 @@ def main():
                                           help="""Map Hi-C reads with bwa mem, then deduplicate contacts with
                                           pairtools and build a .hic file with 3D-DNA""")
     mhicparser.set_defaults(func=map_hic, scriptSuffix="map_hic")
-    add_bwa_arguments(mhicparser)
+    add_bwa_arguments(mhicparser, allowSingleEnd=False)
     mhicparser.add_argument("-p", "--prefix", dest="prefix",
                             required=False,
                             help="""Optionally, specify the prefix for output files; default == the
@@ -1001,6 +1015,69 @@ def main():
                                     default=SALMON_DIR)
     add_pbs_arguments(mindexsalmonparser, jobName="salmon_index",
                       walltime="24:00:00", mem="65G", cpus=8)
+    
+    # Map > rna subparser
+    mrnaparser = subMapParsers.add_parser("rna",
+                                          parents=[p],
+                                          add_help=False,
+                                          help="RNAseq read mapping and quantification")
+    
+    subMapRnaParsers = mrnaparser.add_subparsers(dest="mapRnaMode",
+                                                 required=True)
+    
+    # Map > rna > salmon mode
+    mrnasalmonparser = subMapRnaParsers.add_parser("salmon",
+                                                   parents=[p],
+                                                   add_help=False,
+                                                   help="""Quantify RNAseq reads against a transcriptome with salmon
+                                                   (an array job with one subjob per sample)""")
+    mrnasalmonparser.set_defaults(func=map_rna_salmon, scriptSuffix="salmon_quant")
+    mrnasalmonparser.add_argument("-i", "--index", dest="indexDir",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify the salmon index directory (see 'map index
+                                  salmon'); default == left as a placeholder""",
+                                  default=None)
+    add_reads_arguments(mrnasalmonparser, allowSingleEnd=True)
+    mrnasalmonparser.add_argument("--outdir", dest="outputDir",
+                                  required=False,
+                                  help="""Optionally, specify the output directory, relative to the directory
+                                  the job is submitted from, which will contain a subdirectory for each
+                                  sample; default == '%(default)s'""",
+                                  default="quant")
+    mrnasalmonparser.add_argument("--libtype", dest="libType",
+                                  required=False,
+                                  help="""Optionally, specify the salmon library type (e.g., ISR for paired
+                                  stranded reads), or A to detect it automatically; default == '%(default)s'""",
+                                  default="A")
+    mrnasalmonparser.add_argument("-g", "--genemap", dest="geneMap",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify a GTF/GFF annotation or transcript-to-gene TSV
+                                  to also produce gene-level estimates (quant.genes.sf); default == none""",
+                                  default=None)
+    mrnasalmonparser.add_argument("--bias", dest="bias",
+                                  required=False,
+                                  choices=["none", "gc", "seq", "both"],
+                                  help="""Optionally, specify which bias corrections to apply (fragment GC
+                                  and/or sequence-specific); default == 'gc' for paired reads, otherwise
+                                  'none'""",
+                                  default=None)
+    mrnasalmonparser.add_argument("--bootstraps", dest="bootstraps",
+                                  required=False,
+                                  type=int,
+                                  help="""Optionally, specify the number of bootstrap replicates, which
+                                  tools like sleuth or fishpond use to model quantification
+                                  uncertainty; default == %(default)s""",
+                                  default=0)
+    mrnasalmonparser.add_argument("--salmon", dest="salmonDir",
+                                  required=False,
+                                  action=UserSet,
+                                  help="""Optionally, specify the directory containing the salmon executable;
+                                  default == '%(default)s'""",
+                                  default=SALMON_DIR)
+    add_pbs_arguments(mrnasalmonparser, jobName="salmon_quant",
+                      walltime="04:00:00", mem="15G", cpus=5)
     
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
@@ -1117,6 +1194,11 @@ def mmain(args):
         if args.mapIndexMode == "salmon":
             print("## salmon transcriptome indexing ##")
             validate_m_index_salmon(args)
+    if args.mapMode == "rna":
+        validate_m_rna(args)
+        if args.mapRnaMode == "salmon":
+            print("## salmon RNAseq quantification ##")
+            validate_m_rna_salmon(args)
 
 if __name__ == "__main__":
     main()

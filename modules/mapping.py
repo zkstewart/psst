@@ -16,6 +16,19 @@ from .pbs import finalise_job
 # Files written alongside a FASTA file by 'bwa index'
 BWA_INDEX_SUFFIXES = [".amb", ".ann", ".bwt", ".pac", ".sa"]
 
+def get_array_size(numSamples):
+    '''
+    Parameters:
+        numSamples -- an int of the number of samples to process with one subjob each,
+                      or None if unknown.
+    Returns:
+        arraySize -- an int of the PBS array size, None if only one sample needs no
+                     array, or an '@@numSamples@@' placeholder if numSamples is unknown.
+    '''
+    if numSamples == None:
+        return "@@numSamples@@" # left for the user to fill in
+    return numSamples if numSamples > 1 else None
+
 def map_wgs(args):
     '''
     Generates (and optionally submits) a PBS array job script which maps short DNA reads
@@ -26,10 +39,6 @@ def map_wgs(args):
     Parameters:
         args -- an argparse.Namespace containing validated "map wgs" arguments.
     '''
-    if args.numSamples == None:
-        arraySize = "@@numSamples@@" # left for the user to fill in
-    else:
-        arraySize = args.numSamples if args.numSamples > 1 else None
     finalise_job(args, "map/run_bwa_wgs.sh", {
         "genome": args.genome,
         "readsDir": args.readsDir,
@@ -39,7 +48,7 @@ def map_wgs(args):
         "library": args.library,
         "cpus": args.cpus,
         "sortMem": args.sortMem
-    }, arraySize=arraySize)
+    }, arraySize=get_array_size(args.numSamples))
 
 def map_hic(args):
     '''
@@ -92,3 +101,28 @@ def map_index_salmon(args):
         "ramLimit": args.ramLimit,
         "cpus": args.cpus
     })
+
+def map_rna_salmon(args):
+    '''
+    Generates (and optionally submits) a PBS array job script which quantifies RNAseq
+    reads against a salmon index. Each subjob quantifies one sample; the array size is
+    a placeholder if no reads directory was given, and no array is requested if there
+    is only one sample.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map rna salmon" arguments.
+    '''
+    finalise_job(args, "map/run_salmon_quant.sh", {
+        "salmonDir": args.salmonDir,
+        "indexDir": args.indexDir,
+        "readsDir": args.readsDir,
+        "readsSuffix": args.readsSuffix,
+        "paired": "false" if args.singleEnd else "true",
+        "outputDir": args.outputDir,
+        "libType": args.libType,
+        "geneMap": args.geneMap if args.geneMap != None else "", # empty means no gene map
+        "gcBias": "true" if args.bias in ["gc", "both"] else "false",
+        "seqBias": "true" if args.bias in ["seq", "both"] else "false",
+        "bootstraps": args.bootstraps,
+        "cpus": args.cpus
+    }, arraySize=get_array_size(args.numSamples))

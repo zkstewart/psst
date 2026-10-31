@@ -452,18 +452,38 @@ def validate_m(args):
     '''
     pass # no specific validation needed for this mode
 
+def validate_reads(args, singleEnd):
+    '''
+    Validation for the reads arguments shared by "map" modes (i.e., those added by
+    add_reads_arguments() in psst.py). If a reads directory was given, its read files
+    are located and pairs checked.
+    
+    Parameters:
+        args -- an argparse.Namespace containing reads arguments.
+        singleEnd -- a boolean indicating whether reads are single-end rather than paired.
+    Returns:
+        samples -- a list of samples as returned by get_read_files(), or None if no
+                   reads directory was given.
+    '''
+    if args.readsSuffix == "":
+        raise ValueError("-rs must be given a non-empty value")
+    if args.readsDir == None:
+        return None
+    args.readsDir = os.path.abspath(args.readsDir)
+    if not os.path.isdir(args.readsDir):
+        raise DirectoryNotFoundError(f"Reads directory (-d {args.readsDir}) does not exist!")
+    return get_read_files(args.readsDir, args.readsSuffix, singleEnd)
+
 def validate_bwa_inputs(args, singleEnd):
     '''
     Validation for the reference genome and reads arguments shared by "map" modes which
-    run bwa mem (i.e., those added by add_bwa_arguments() in psst.py). If a reads
-    directory was given, its read files are located and pairs checked.
+    run bwa mem (i.e., those added by add_bwa_arguments() in psst.py).
     
     Parameters:
         args -- an argparse.Namespace containing bwa input arguments.
         singleEnd -- a boolean indicating whether reads are single-end rather than paired.
     Returns:
-        samples -- a list of samples as returned by get_read_files(), or None if no
-                   reads directory was given.
+        samples -- a list of samples as returned by validate_reads().
     '''
     # Validate the reference genome and its bwa index, which may be built by a job
     # this one depends on
@@ -476,16 +496,7 @@ def validate_bwa_inputs(args, singleEnd):
         elif missing != []:
             raise FileNotFoundError(f"Reference genome (-r {args.genome}) is not indexed; " +
                                     f"run 'bwa index' on it first ({args.genome}{missing[0]} not found)")
-    
-    # Validate reads
-    if args.readsSuffix == "":
-        raise ValueError("-rs must be given a non-empty value")
-    if args.readsDir == None:
-        return None
-    args.readsDir = os.path.abspath(args.readsDir)
-    if not os.path.isdir(args.readsDir):
-        raise DirectoryNotFoundError(f"Reads directory (-d {args.readsDir}) does not exist!")
-    return get_read_files(args.readsDir, args.readsSuffix, singleEnd)
+    return validate_reads(args, singleEnd)
 
 def validate_sort_mem(sortMem):
     '''
@@ -590,6 +601,57 @@ def validate_m_index_salmon(args):
         raise ValueError("--ram-limit must be >= 1")
     if args.ramLimit >= memGB:
         raise ValueError(f"--ram-limit {args.ramLimit} must be less than --mem {args.mem}")
+
+def validate_m_rna(args):
+    '''
+    Validation for arguments common to all "map rna" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_m_rna_salmon(args):
+    '''
+    Validation for arguments used in "map rna salmon" mode. If a reads directory was
+    given, its samples are counted to determine the array job size.
+    '''
+    validate_program_dir(args, "salmonDir", "salmon", "--salmon")
+    validate_input_file(args, "geneMap", "-g", "Gene map file")
+    
+    # Validate the salmon index, which may be built by a job this one depends on
+    if "indexDir" in args.userSet:
+        args.indexDir = os.path.abspath(args.indexDir)
+        if not os.path.isfile(os.path.join(args.indexDir, "info.json")) and args.afterok:
+            print(f"WARNING: salmon index (-i {args.indexDir}) does not exist yet; " +
+                  "the --afterok job(s) must build it")
+        elif not os.path.isfile(os.path.join(args.indexDir, "info.json")):
+            raise FileNotFoundError(f"Salmon index (-i {args.indexDir}) does not exist or is incomplete!")
+    
+    # Validate reads and count samples
+    samples = validate_reads(args, args.singleEnd)
+    args.numSamples = None
+    if samples != None:
+        args.numSamples = len(samples)
+        print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to quantify")
+    
+    # Validate the library type; paired types start with I, O or M (e.g., ISR), and
+    # single-end types do not (e.g., SR)
+    if args.libType != "A":
+        if re.match(r"^[IOM]?(U|S[FR])$", args.libType) == None:
+            raise FormatError(f"--libtype '{args.libType}' is not a valid salmon library type (e.g., A, IU, ISR, U, SR)")
+        if args.singleEnd == (args.libType[0] in "IOM"):
+            raise ValueError(f"--libtype '{args.libType}' is a {'paired' if args.libType[0] in 'IOM' else 'single-end'} " +
+                             f"library type, but reads are {'single-end' if args.singleEnd else 'paired'}")
+    
+    # Validate bias correction, defaulting to GC bias correction for paired reads
+    if args.bias == None:
+        args.bias = "none" if args.singleEnd else "gc"
+    if args.singleEnd and args.bias in ["gc", "both"]:
+        raise ValueError("--bias gc requires paired reads, since it models fragment GC content")
+    
+    # Validate behavioural parameters
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if args.bootstraps < 0:
+        raise ValueError("--bootstraps must be >= 0")
 
 def validate_ratio(value, flag):
     '''
