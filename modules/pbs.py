@@ -81,7 +81,7 @@ def fill_template(templateName, values, quote=True):
     return filled, missing
 
 def format_pbs_header(jobName, walltime, mem, cpus, rpid, afterok=None, afternotok=None,
-                      gpus=None, gpuID=None):
+                      gpus=None, gpuID=None, arraySize=None):
     '''
     Parameters:
         jobName -- a string of the PBS job name.
@@ -95,6 +95,8 @@ def format_pbs_header(jobName, walltime, mem, cpus, rpid, afterok=None, afternot
                       job can start.
         gpus -- OPTIONAL; an int of the number of GPUs to request.
         gpuID -- OPTIONAL; a string of the GPU type to request (e.g., 'H100').
+        arraySize -- OPTIONAL; an int of the number of array subjobs to request, or
+                     an '@@field@@' placeholder string for the user to fill in.
     Returns:
         header -- a string of the PBS directives and preamble for a job script.
     '''
@@ -107,6 +109,8 @@ def format_pbs_header(jobName, walltime, mem, cpus, rpid, afterok=None, afternot
         extraDirectives += f"\n#PBS -l ngpus={gpus}"
     if gpuID != None:
         extraDirectives += f"\n#PBS -l gpu_id={gpuID}"
+    if arraySize != None:
+        extraDirectives += f"\n#PBS -J 1-{arraySize}"
     if afterok:
         extraDirectives += "\n#PBS -W depend=afterok:" + ":".join(afterok)
     elif afternotok:
@@ -176,7 +180,7 @@ def check_placeholders(args, missing):
                          ", ".join(missing))
     print("Job script(s) contain placeholders to fill in before submission: " + ", ".join(missing))
 
-def finalise_job(args, templateName, values):
+def finalise_job(args, templateName, values, arraySize=None):
     '''
     Fills a job template, writes the job script and, if requested, submits it with qsub.
     Submission is refused if any placeholders remain in the script. Used by modes which
@@ -186,13 +190,16 @@ def finalise_job(args, templateName, values):
         args -- an argparse.Namespace containing validated PBS arguments and args.qsub.
         templateName -- a string of the job template path relative to the templates directory.
         values -- a dict of template field names to values (or None).
+        arraySize -- OPTIONAL; passed to format_pbs_header() to request an array job.
     '''
     body, missing = fill_template(templateName, values)
+    header = format_pbs_header(args.jobName, args.walltime, args.mem, args.cpus, args.rpid,
+                               afterok=args.afterok, afternotok=args.afternotok,
+                               arraySize=arraySize)
+    missing = PLACEHOLDER_REGEX.findall(header) + missing # placeholders can be given in header values
     if args.qsub and missing != []:
         check_placeholders(args, missing) # raises an error before anything is written
     
-    header = format_pbs_header(args.jobName, args.walltime, args.mem, args.cpus, args.rpid,
-                               afterok=args.afterok, afternotok=args.afternotok)
     write_job_script(args.scriptFile, header, body)
     check_placeholders(args, missing)
     if args.qsub:

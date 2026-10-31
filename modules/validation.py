@@ -15,6 +15,7 @@ import os, re, shutil
 
 from .basecalling import DORADO_SCRIPTS
 from .config import CONFIG, RPID_REGEX
+from .reads import get_read_files
 
 # Note: only values the user explicitly specified (recorded in args.userSet by the
 # UserSet argparse action) are checked to exist; default locations are used unchecked.
@@ -433,6 +434,45 @@ def validate_bs_archive(args):
         raise FormatError(f"-p '{args.prefix}' must not contain whitespace")
     if args.readsDir == "":
         raise ValueError("--readsdir must be given a non-empty value")
+
+def validate_m(args):
+    '''
+    Validation for arguments common to all "map" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_m_wgs(args):
+    '''
+    Validation for arguments used in "map wgs" mode. If a reads directory was given,
+    its read files are located (and pairs checked) to determine the array job size.
+    '''
+    # Validate the reference genome and its bwa index
+    validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
+    if "genome" in args.userSet:
+        for indexSuffix in [".amb", ".ann", ".bwt", ".pac", ".sa"]:
+            if not os.path.isfile(args.genome + indexSuffix):
+                raise FileNotFoundError(f"Reference genome (-r {args.genome}) is not indexed; " +
+                                        f"run 'bwa index' on it first ({args.genome}{indexSuffix} not found)")
+    
+    # Validate reads and count samples
+    if args.readsSuffix == "":
+        raise ValueError("-rs must be given a non-empty value")
+    args.numSamples = None
+    if args.readsDir != None:
+        args.readsDir = os.path.abspath(args.readsDir)
+        if not os.path.isdir(args.readsDir):
+            raise DirectoryNotFoundError(f"Reads directory (-d {args.readsDir}) does not exist!")
+        samples = get_read_files(args.readsDir, args.readsSuffix, args.singleEnd)
+        args.numSamples = len(samples)
+        print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to map")
+    
+    # Validate behavioural parameters
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if re.match(r"^[^\s@]+$", args.library) == None:
+        raise FormatError(f"--library '{args.library}' must be non-empty and not contain whitespace or '@'")
+    if re.match(r"^\d+[KMG]$", args.sortMem) == None:
+        raise FormatError(f"--sort-mem '{args.sortMem}' must be in the format '<number>K/M/G' (e.g., '2G')")
 
 def validate_ratio(value, flag):
     '''

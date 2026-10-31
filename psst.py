@@ -34,6 +34,8 @@ from modules.validation import \
         validate_bs_download, validate_bs_prepare, validate_bs_archive, \
     validate_cl, \
         validate_cl_mmseqs2, validate_cl_cdhit, \
+    validate_m, \
+        validate_m_wgs, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
@@ -41,6 +43,7 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
+from modules.mapping import map_wgs
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
@@ -817,6 +820,62 @@ def main():
     add_pbs_arguments(clcdhitparser, jobName="cdhit",
                       walltime="48:00:00", mem="30G", cpus=8)
     
+    # Map subparser
+    mparser = subparsers.add_parser("map",
+                                    parents=[p],
+                                    add_help=False,
+                                    help="Read mapping jobs")
+    
+    subMapParsers = mparser.add_subparsers(dest="mapMode",
+                                           required=True)
+    
+    # Map > wgs mode
+    mwgsparser = subMapParsers.add_parser("wgs",
+                                          parents=[p],
+                                          add_help=False,
+                                          help="""Map Illumina DNA reads with bwa mem, then sort and mark
+                                          duplicates (an array job with one subjob per sample)""")
+    mwgsparser.set_defaults(func=map_wgs, scriptSuffix="map_wgs")
+    mwgsparser.add_argument("-r", "--reference", dest="genome",
+                            required=False,
+                            action=UserSet,
+                            help="""Optionally, specify the location of the reference genome FASTA file,
+                            which must be indexed with 'bwa index'; default == left as a placeholder""",
+                            default=None)
+    mwgsparser.add_argument("-d", "--readsdir", dest="readsDir",
+                            required=False,
+                            help="""Optionally, specify the directory containing the read files; if given,
+                            reads are checked and counted to size the array job; default == left as
+                            a placeholder""",
+                            default=None)
+    mwgsparser.add_argument("-rs", "--suffix", dest="readsSuffix",
+                            required=False,
+                            help="""Optionally, specify the suffix which identifies read files, where the
+                            character before it is 1 or 2 for paired reads; default == '%(default)s'""",
+                            default=".fq.gz")
+    mwgsparser.add_argument("--singleEnd", dest="singleEnd",
+                            required=False,
+                            action="store_true",
+                            help="""Optionally, indicate that reads are single-end rather than paired""",
+                            default=False)
+    mwgsparser.add_argument("--outdir", dest="outputDir",
+                            required=False,
+                            help="""Optionally, specify the output directory, relative to the
+                            directory the job is submitted from; default == '%(default)s'""",
+                            default="mapped")
+    mwgsparser.add_argument("--library", dest="library",
+                            required=False,
+                            help="""Optionally, specify the library name (LB) for read groups;
+                            default == '%(default)s'""",
+                            default="lib1")
+    mwgsparser.add_argument("--sort-mem", dest="sortMem",
+                            required=False,
+                            help="""Optionally, specify the memory per samtools sort thread, which
+                            multiplied by --cpus should be well below --mem; default == '%(default)s'""",
+                            default="3G")
+    add_pbs_arguments(mwgsparser, jobName="map_wgs",
+                      walltime="24:00:00", mem="55G", cpus=8)
+    
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
@@ -848,6 +907,10 @@ def main():
         print("## psst.py - Clustering handling ##")
         validate_cl(args)
         clmain(args)
+    if args.mode == "map":
+        print("## psst.py - Read mapping handling ##")
+        validate_m(args)
+        mmain(args)
     
     # Validate PBS arguments and write (+/- submit) the job script(s)
     if args.pbsMode != None:
@@ -911,6 +974,12 @@ def clmain(args):
     if args.clusteringMode == "cdhit":
         print("## CD-HIT clustering ##")
         validate_cl_cdhit(args)
+
+def mmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.mapMode == "wgs":
+        print("## bwa mem WGS read mapping ##")
+        validate_m_wgs(args)
 
 if __name__ == "__main__":
     main()
