@@ -36,6 +36,7 @@ from modules.validation import \
         validate_cl_mmseqs2, validate_cl_cdhit, \
     validate_m, \
         validate_m_wgs, validate_m_hic, \
+        validate_m_nanopore, \
         validate_m_index, \
             validate_m_index_bwa, validate_m_index_salmon, validate_m_index_star, \
         validate_m_rna, \
@@ -47,9 +48,9 @@ from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star
+from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
@@ -945,6 +946,75 @@ def main():
     add_pbs_arguments(mhicparser, jobName="map_hic",
                       walltime="48:00:00", mem="80G", cpus=16)
     
+    # Map > nanopore mode
+    mnanoporeparser = subMapParsers.add_parser("nanopore",
+                                               parents=[p],
+                                               add_help=False,
+                                               help="""Map nanopore reads with minimap2 (optionally filtered with
+                                               chopper) to a sorted BAM (an array job with one subjob per sample)""")
+    mnanoporeparser.set_defaults(func=map_nanopore, scriptSuffix="map_nanopore")
+    mnanoporeparser.add_argument("-r", "--reference", dest="genome",
+                                 required=False,
+                                 action=UserSet,
+                                 help="""Optionally, specify the location of the reference genome FASTA file;
+                                 default == left as a placeholder""",
+                                 default=None)
+    add_reads_arguments(mnanoporeparser, allowSingleEnd=False)
+    mnanoporeparser.add_argument("-x", "--preset", dest="preset",
+                                 required=False,
+                                 choices=["map-ont", "lr:hq", "splice", "splice:hq"],
+                                 help="""Optionally, specify the minimap2 preset; use 'lr:hq' for
+                                 high-accuracy (e.g., Q20+) genomic reads, or 'splice'/'splice:hq' for
+                                 cDNA or direct RNA reads; default == '%(default)s'""",
+                                 default="map-ont")
+    mnanoporeparser.add_argument("--outdir", dest="outputDir",
+                                 required=False,
+                                 help="""Optionally, specify the output directory, relative to the
+                                 directory the job is submitted from; default == '%(default)s'""",
+                                 default="mapped")
+    mnanoporeparser.add_argument("--library", dest="library",
+                                 required=False,
+                                 help="""Optionally, specify the library name (LB) for read groups;
+                                 default == '%(default)s'""",
+                                 default="lib1")
+    mnanoporeparser.add_argument("--minlength", dest="minLength",
+                                 required=False,
+                                 type=int,
+                                 help="""Optionally, filter out reads shorter than this with chopper;
+                                 default == %(default)s (no filter)""",
+                                 default=0)
+    mnanoporeparser.add_argument("--maxlength", dest="maxLength",
+                                 required=False,
+                                 type=int,
+                                 help="""Optionally, filter out reads longer than this with chopper;
+                                 default == %(default)s (no filter)""",
+                                 default=0)
+    mnanoporeparser.add_argument("--minqual", dest="minQual",
+                                 required=False,
+                                 type=int,
+                                 help="""Optionally, filter out reads with a mean Phred quality below this
+                                 with chopper; default == %(default)s (no filter)""",
+                                 default=0)
+    mnanoporeparser.add_argument("--sort-mem", dest="sortMem",
+                                 required=False,
+                                 help="""Optionally, specify the memory per samtools sort thread, which
+                                 multiplied by --cpus should be well below --mem; default == '%(default)s'""",
+                                 default="2G")
+    mnanoporeparser.add_argument("--minimap2", dest="minimap2Dir",
+                                 required=False,
+                                 action=UserSet,
+                                 help="""Optionally, specify the directory containing the minimap2
+                                 executable; default == '%(default)s'""",
+                                 default=MINIMAP2_DIR)
+    mnanoporeparser.add_argument("--chopper", dest="chopperDir",
+                                 required=False,
+                                 action=UserSet,
+                                 help="""Optionally, specify the directory containing the chopper
+                                 executable; default == '%(default)s'""",
+                                 default=CHOPPER_DIR)
+    add_pbs_arguments(mnanoporeparser, jobName="map_nanopore",
+                      walltime="24:00:00", mem="40G", cpus=8)
+    
     # Map > index subparser
     mindexparser = subMapParsers.add_parser("index",
                                             parents=[p],
@@ -1259,6 +1329,9 @@ def mmain(args):
     if args.mapMode == "hic":
         print("## bwa mem Hi-C read mapping and .hic generation ##")
         validate_m_hic(args)
+    if args.mapMode == "nanopore":
+        print("## minimap2 nanopore read mapping ##")
+        validate_m_nanopore(args)
     if args.mapMode == "index":
         validate_m_index(args)
         if args.mapIndexMode == "bwa":

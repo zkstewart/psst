@@ -715,6 +715,36 @@ def validate_m_rna_star(args):
     if args.outputDir == "":
         raise ValueError("--outdir must be given a non-empty value")
 
+def validate_m_nanopore(args):
+    '''
+    Validation for arguments used in "map nanopore" mode. If a reads directory was
+    given, its samples are counted to determine the array job size.
+    '''
+    validate_program_dir(args, "minimap2Dir", "minimap2", "--minimap2")
+    validate_program_dir(args, "chopperDir", "chopper", "--chopper")
+    validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
+    
+    # Validate reads and count samples
+    samples = validate_reads(args, True)
+    args.numSamples = None
+    if samples != None:
+        args.numSamples = len(samples)
+        print(f"Found {args.numSamples} sample(s) to map")
+    
+    # Validate read filtering parameters
+    for flag, value in [("--minlength", args.minLength), ("--maxlength", args.maxLength), ("--minqual", args.minQual)]:
+        if value < 0:
+            raise ValueError(f"{flag} must be >= 0")
+    if args.maxLength > 0 and args.minLength > args.maxLength:
+        raise ValueError("--minlength must not be greater than --maxlength")
+    
+    # Validate behavioural parameters
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if re.match(r"^[^\s@]+$", args.library) == None:
+        raise FormatError(f"--library '{args.library}' must be non-empty and not contain whitespace or '@'")
+    validate_sort_mem(args.sortMem)
+
 def validate_ratio(value, flag):
     '''
     Parameters:

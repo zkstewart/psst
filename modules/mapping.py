@@ -166,3 +166,29 @@ def map_rna_star(args):
         "twopass": "true" if args.twopass else "false",
         "cpus": args.cpus
     }, arraySize=get_array_size(args.numSamples))
+
+def map_nanopore(args):
+    '''
+    Generates (and optionally submits) a PBS array job script which maps nanopore reads
+    with minimap2, optionally filtering them with chopper first, and pipes alignments
+    into a sorted BAM. Each subjob maps one sample; the array size is a placeholder if
+    no reads directory was given, and no array is requested if there is only one sample.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map nanopore" arguments.
+    '''
+    finalise_job(args, "map/run_minimap2_nanopore.sh", {
+        "minimap2Dir": args.minimap2Dir,
+        "chopperDir": args.chopperDir,
+        "genome": args.genome,
+        "readsDir": args.readsDir,
+        "readsSuffix": args.readsSuffix,
+        "outputDir": args.outputDir,
+        "preset": args.preset,
+        "library": args.library,
+        "minLength": args.minLength,
+        "maxLength": args.maxLength,
+        "minQual": args.minQual,
+        "cpus": args.cpus,
+        "sortMem": args.sortMem
+    }, arraySize=get_array_size(args.numSamples))

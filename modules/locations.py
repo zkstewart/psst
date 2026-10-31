@@ -33,6 +33,8 @@ THREEDDNA_DIR = CONFIG["programs"]["threeddna_dir"]
 PAIRTOOLS_CONDA_ENV = CONFIG["programs"]["pairtools_conda_env"]
 SALMON_DIR = CONFIG["programs"]["salmon_dir"]
 STAR_MODULE = CONFIG["programs"]["star_module"]
+MINIMAP2_DIR = CONFIG["programs"]["minimap2_dir"]
+CHOPPER_DIR = CONFIG["programs"]["chopper_dir"]
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = CONFIG["databases"]["refseq_plant_fasta"]
