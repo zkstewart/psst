@@ -138,6 +138,13 @@ VALIDATION_ERRORS = [
     (["call", "nanopore", "--hic"], "unrecognized arguments: --hic"),
     (["call", "giraffe", "--hic"], "unrecognized arguments: --hic"),
     (["call", "giraffe", "-i", "{unpaired}"], "is missing reference.fa"),
+    (["call", "filter", "-i", "{genome}.missing"], "VCF file (-i"),
+    (["call", "filter", "-i", "{genome}", "-o", "out.vcf"], "must end with '.vcf.gz'"),
+    (["call", "filter", "--max-missing", "1.5"], "--max-missing must be a ratio"),
+    (["call", "filter", "--minq", "-1"], "--minq must be >= 0"),
+    (["call", "filter", "--mac", "-1"], "--mac must be >= 0"),
+    (["call", "filter", "--maf", "0.6"], "--maf must be greater than 0 and at most 0.5"),
+    (["call", "filter", "--maf", "0"], "--maf must be greater than 0 and at most 0.5"),
     # map modes
     (["map", "short", "--hic", "--singleEnd"], "--hic and --singleEnd are mutually exclusive"),
     (["map", "short", "-r", "{nofai}"], "run 'bwa index' on it first"),
@@ -190,6 +197,15 @@ def test_call_derives_prefixes(inputs, tmp_path):
     assert "PREFIX=pg\n" in text
     assert f"TARGETS={inputs['giraffe']}/targets.tsv.gz\n" in text
     assert f"SITES={inputs['giraffe']}/sites.vcf.gz\n" in open(tmp_path / "call_giraffe_concat.sh").read()
+
+def test_call_filter_derives_output(inputs, tmp_path):
+    vcf = os.path.join(os.path.dirname(inputs["genome"]), "calls.vcf.gz")
+    open(vcf, "w").close()
+    run_psst(["call", "filter", "-i", vcf], tmp_path)
+    assert f"OUTVCF={vcf[:-7]}.filtered.vcf.gz\n" in open(tmp_path / "call_filter.sh").read()
+    open(vcf[:-7] + ".filtered.vcf.gz", "w").close()
+    result = run_psst(["call", "filter", "-i", vcf, "--name", "again", "--script", "again.sh"], tmp_path, check=False)
+    assert "already exists" in result.stderr
 
 def test_call_short_hic_sets_orphans(tmp_path):
     run_psst(["call", "short", "--hic"], tmp_path)

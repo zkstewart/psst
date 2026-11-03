@@ -3,12 +3,16 @@
 # Every invocation is logged to $STUB_DIR/calls.log, then:
 #   mpileup -- copies its -R regions file to $STUB_DIR/regions_<array index>.txt
 #   concat -- writes its input files' contents, in order, to its -o output
-#   norm -- writes 'chunk <array index>' to its -o output
+#   norm -- writes 'chunk <array index>' to its -o output, if any
 #   index -- writes a placeholder to its -o output, or else to <input>.csi
 #   merge -- writes a placeholder to its -o output
 #   call -- does nothing
 
-import os, shutil, sys
+import os, shutil, stat, sys
+
+# Read any piped input, as real bcftools would, so that upstream commands aren't cut off
+if stat.S_ISFIFO(os.fstat(0).st_mode):
+    sys.stdin.buffer.read()
 
 args = sys.argv[1:]
 command = args[0]
@@ -26,7 +30,7 @@ elif command == "concat":
         for fileName in [ a for a in args[1:] if os.path.isfile(a) ]:
             with open(fileName) as fileIn:
                 fileOut.write(fileIn.read())
-elif command == "norm":
+elif command == "norm" and output != None:
     with open(output, "w") as fileOut:
         fileOut.write(f"chunk {arrayIndex}\n")
 elif command == "index" and output == None:

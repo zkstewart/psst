@@ -14,7 +14,7 @@
 import gzip, re, struct
 
 from .mapping import get_array_size
-from .pbs import fill_template, format_pbs_header, write_job_script, submit_job, check_placeholders
+from .pbs import fill_template, format_pbs_header, write_job_script, submit_job, check_placeholders, finalise_job
 
 # Files which can index a BAM file, given as suffixes appended to its full name or
 # replacing its '.bam' extension
@@ -143,3 +143,25 @@ def call_variants(args):
     else:
         print(f"Submit '{args.scriptFiles['concat']}' to run after the calling job succeeds, " +
               "i.e., with 'qsub -W depend=afterok:<calling job ID>'")
+
+def call_filter(args):
+    '''
+    Generates (and optionally submits) a PBS job script which filters the sites of a VCF
+    with bcftools by missingness, quality, minor allele count and (optionally) frequency,
+    FILTER status, number of alleles and variant type.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "call filter" arguments.
+    '''
+    finalise_job(args, "call/run_bcftools_filter.sh", {
+        "vcf": args.vcf,
+        "outputFile": args.outputFile,
+        "maxMissing": args.maxMissing,
+        "minQ": args.minQ,
+        "mac": args.mac,
+        "maf": args.maf if args.maf != None else "", # empty disables the filter
+        "passOnly": "false" if args.keepFiltered else "true",
+        "biallelic": "true" if args.biallelic else "false",
+        "noIndels": "true" if args.noIndels else "false",
+        "cpus": args.cpus
+    })

@@ -879,8 +879,14 @@ def validate_giraffe_index(args, requiredFiles):
 
 def validate_c(args):
     '''
-    Validation for arguments common to all "call" mode commands (i.e., those added by
-    add_call_arguments() in psst.py).
+    Validation for arguments common to all "call" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_calling(args):
+    '''
+    Validation for the arguments of "call" modes which call variants from BAM files (i.e.,
+    those added by add_call_arguments() in psst.py).
     '''
     # Validate the reference genome, whose .fai index determines the contigs to call; for
     # "call giraffe", it and the variant sites to genotype come from the giraffe index
@@ -960,19 +966,46 @@ def validate_c_short(args):
     '''
     Validation for arguments used in "call short" mode.
     '''
-    pass # all arguments are validated by validate_c()
+    validate_calling(args)
 
 def validate_c_giraffe(args):
     '''
     Validation for arguments used in "call giraffe" mode.
     '''
-    pass # all arguments are validated by validate_c()
+    validate_calling(args)
+
+def validate_c_filter(args):
+    '''
+    Validation for arguments used in "call filter" mode.
+    '''
+    validate_input_file(args, "vcf", "-i", "VCF file")
+    
+    # Validate the output file, derived from the input file if not given
+    if args.outputFile == None and args.vcf != None:
+        args.outputFile = re.sub(r"\.(vcf\.gz|vcf|bcf)$", "", args.vcf) + ".filtered.vcf.gz"
+    if args.outputFile != None:
+        args.outputFile = os.path.abspath(args.outputFile)
+        if not args.outputFile.endswith(".vcf.gz"):
+            raise ValueError(f"-o {args.outputFile} must end with '.vcf.gz'")
+        if os.path.exists(args.outputFile):
+            raise FileExistsError(f"Output file (-o {args.outputFile}) already exists!")
+        if not os.path.isdir(os.path.dirname(args.outputFile)):
+            raise DirectoryNotFoundError(f"Output file (-o {args.outputFile}) is in a directory that does not exist!")
+    
+    # Validate filter thresholds
+    validate_ratio(args.maxMissing, "--max-missing")
+    if args.minQ < 0:
+        raise ValueError("--minq must be >= 0")
+    if args.mac < 0:
+        raise ValueError("--mac must be >= 0")
+    if args.maf != None and not 0 < args.maf <= 0.5:
+        raise ValueError("--maf must be greater than 0 and at most 0.5")
 
 def validate_c_nanopore(args):
     '''
     Validation for arguments used in "call nanopore" mode.
     '''
-    pass # all arguments are validated by validate_c()
+    validate_calling(args)
 
 def validate_cl(args):
     '''

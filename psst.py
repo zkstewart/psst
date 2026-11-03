@@ -33,7 +33,7 @@ from modules.validation import \
     validate_bs, \
         validate_bs_download, validate_bs_prepare, validate_bs_archive, \
     validate_c, \
-        validate_c_short, validate_c_giraffe, validate_c_nanopore, \
+        validate_c_short, validate_c_giraffe, validate_c_nanopore, validate_c_filter, \
     validate_cl, \
         validate_cl_mmseqs2, validate_cl_cdhit, \
     validate_h, \
@@ -50,7 +50,7 @@ from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffo
 from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
-from modules.calling import call_variants
+from modules.calling import call_variants, call_filter
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
 from modules.hic import hic_contacts
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
@@ -915,6 +915,71 @@ def main():
                                                 'map nanopore') with bcftools' ont-sup profile""")
     cnanoporeparser.set_defaults(func=call_variants)
     add_call_arguments(cnanoporeparser, bamSuffix=".sorted.bam", jobName="call_nanopore", readType="nanopore")
+    
+    # Call > filter mode
+    cfilterparser = subCallParsers.add_parser("filter",
+                                              parents=[p],
+                                              add_help=False,
+                                              help="""Filter the sites of a VCF (e.g., from another 'call' mode) with
+                                              bcftools""")
+    cfilterparser.set_defaults(func=call_filter, scriptSuffix="call_filter")
+    cfilterparser.add_argument("-i", "--input", dest="vcf",
+                               required=False,
+                               action=UserSet,
+                               help="""Optionally, specify the location of the VCF file to filter;
+                               default == left as a placeholder""",
+                               default=None)
+    cfilterparser.add_argument("-o", "--output", dest="outputFile",
+                               required=False,
+                               help="""Optionally, specify the filtered VCF file to create, ending with
+                               '.vcf.gz'; default == '<input>.filtered.vcf.gz' if -i is given, otherwise
+                               left as a placeholder""",
+                               default=None)
+    cfilterparser.add_argument("--max-missing", dest="maxMissing",
+                               required=False,
+                               type=float,
+                               help="""Optionally, specify the maximum fraction of samples with a missing
+                               genotype at a site (e.g., 0.5 keeps sites genotyped in at least half of the
+                               samples); 1 disables this filter; default == %(default)s""",
+                               default=0.5)
+    cfilterparser.add_argument("--minq", dest="minQ",
+                               required=False,
+                               type=float,
+                               help="""Optionally, specify the minimum site quality (QUAL); 0 disables this
+                               filter; default == %(default)s""",
+                               default=30)
+    cfilterparser.add_argument("--mac", dest="mac",
+                               required=False,
+                               type=int,
+                               help="""Optionally, specify the minimum minor allele count, which removes
+                               sites where every sample has the same allele; 0 disables this filter;
+                               default == %(default)s""",
+                               default=1)
+    cfilterparser.add_argument("--maf", dest="maf",
+                               required=False,
+                               type=float,
+                               help="""Optionally, specify the minimum minor allele frequency (e.g., 0.05);
+                               default == no filter""",
+                               default=None)
+    cfilterparser.add_argument("--biallelic", dest="biallelic",
+                               required=False,
+                               action="store_true",
+                               help="""Optionally, remove multiallelic sites, including those whose
+                               alleles are split across records at the same position""",
+                               default=False)
+    cfilterparser.add_argument("--no-indels", dest="noIndels",
+                               required=False,
+                               action="store_true",
+                               help="""Optionally, remove indels and complex variants""",
+                               default=False)
+    cfilterparser.add_argument("--keep-filtered", dest="keepFiltered",
+                               required=False,
+                               action="store_true",
+                               help="""Optionally, keep sites whose FILTER is not PASS (or '.'), which
+                               are otherwise removed""",
+                               default=False)
+    add_pbs_arguments(cfilterparser, jobName="call_filter",
+                      walltime="12:00:00", mem="8G", cpus=2)
 
     # Clustering subparser
     clparser = subparsers.add_parser("clustering",
@@ -1569,6 +1634,9 @@ def cmain(args):
     if args.callMode == "giraffe":
         print("## bcftools pangenome variant genotyping ##")
         validate_c_giraffe(args)
+    if args.callMode == "filter":
+        print("## bcftools variant filtering ##")
+        validate_c_filter(args)
     if args.callMode == "nanopore":
         print("## bcftools nanopore variant calling ##")
         validate_c_nanopore(args)
