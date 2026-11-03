@@ -21,9 +21,10 @@ from .pbs import fill_template, format_pbs_header, write_job_script, submit_job,
 BAM_INDEX_SUFFIXES = [".bai", ".csi"]
 
 # bcftools mpileup -X platform profile for each "call" mode; modes without short read
-# arguments (i.e., minBaseQ, hic, indelsCns) leave these settings to the profile
+# arguments (i.e., minBaseQ, indelsCns) leave these settings to the profile
 CALL_PROFILES = {
     "short": "",
+    "giraffe": "",
     "nanopore": "ont-sup"
 }
 
@@ -52,14 +53,31 @@ def get_bam_samples(bamFile):
             samples.update(re.findall(r"\tSM:([^\t]+)", line))
     return sorted(samples)
 
+def get_vcf_samples(vcfFile):
+    '''
+    Parameters:
+        vcfFile -- a string of the location of a bgzipped VCF file.
+    Returns:
+        samples -- a list of the sample names in the VCF header.
+    '''
+    with gzip.open(vcfFile, "rt") as fileIn:
+        for line in fileIn:
+            if line.startswith("#CHROM"):
+                return line.rstrip("\r\n").split("\t")[9:]
+            if not line.startswith("#"):
+                break
+    return []
+
 def call_variants(args):
     '''
     Generates (and optionally submits) the two PBS job scripts of a "call" mode:
         <name>.sh -- an array job which divides the genome into chunks of whole contigs,
                      each subjob calling variants jointly across all BAM files with
-                     bcftools mpileup | call | norm
+                     bcftools mpileup | call | norm (or, given target alleles, genotyping
+                     samples at every target allele)
         <name>_concat.sh -- concatenates the chunks in genome order into
-                            <outdir>/<prefix>.vcf.gz and indexes it
+                            <outdir>/<prefix>.vcf.gz (merging them into the variant
+                            sites, if given) and indexes it
 
     With --qsub, the concatenation job is submitted to run after every calling subjob
     succeeds.
@@ -79,9 +97,12 @@ def call_variants(args):
             "genome": args.genome,
             "bamDir": args.bamDir,
             "bamSuffix": args.bamSuffix,
+            "targets": args.targets,
             "minMapQ": args.minMapQ,
             "minBaseQ": getattr(args, "minBaseQ", ""), # empty uses the profile's default
-            "countOrphans": "true" if getattr(args, "hic", False) else "false", # Hi-C pairs aren't proper
+            # Pairs not flagged as properly paired are used for Hi-C, whose pairs never are,
+            # and giraffe, which can leave pairs spanning deletions unflagged
+            "countOrphans": "true" if getattr(args, "hic", False) or args.callMode == "giraffe" else "false",
             "maxDepth": args.maxDepth,
             "indelsCns": "true" if getattr(args, "indelsCns", False) else "false",
             "ploidy": args.ploidy,
@@ -90,6 +111,7 @@ def call_variants(args):
              "arraySize": get_array_size(args.chunks) }),
         ("concat", "call/run_bcftools_concat.sh", {
             **common,
+            "sites": args.sites,
             "cpus": args.concatCpus
         }, {})
     ]

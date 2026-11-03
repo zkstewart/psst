@@ -14,8 +14,8 @@
 import os, re, shutil
 
 from .basecalling import DORADO_SCRIPTS
-from .calling import BAM_INDEX_SUFFIXES, get_bam_samples
-from .mapping import BWA_INDEX_SUFFIXES
+from .calling import BAM_INDEX_SUFFIXES, get_bam_samples, get_vcf_samples
+from .mapping import BWA_INDEX_SUFFIXES, GIRAFFE_MAP_FILES, GIRAFFE_CALL_FILES
 from .config import CONFIG, RPID_REGEX
 from .reads import get_read_files
 
@@ -645,6 +645,47 @@ def validate_m_index_star(args):
     args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
     args.ramLimit = int(parse_mem_gb(args.mem) * 0.9 * 1024**3)
 
+def validate_m_index_giraffe(args):
+    '''
+    Validation for arguments used in "map index giraffe" mode.
+    '''
+    validate_program_dir(args, "vgDir", "vg", "--vg")
+    validate_input_file(args, "gbz", "-g", "Pangenome GBZ file")
+    validate_input_file(args, "vcf", "--vcf", "Pangenome VCF file")
+    if args.refSample != "" and re.match(r"^[^\s#]+$", args.refSample) == None:
+        raise FormatError(f"--refsample '{args.refSample}' must not contain whitespace or '#'")
+    
+    # Validate the index directory, derived from the GBZ file if not given
+    if args.indexDir == None and args.gbz != None:
+        args.indexDir = re.sub(r"\.gbz$", "", args.gbz) + "_giraffe_index"
+    if args.indexDir != None:
+        args.indexDir = os.path.abspath(args.indexDir)
+        if os.path.exists(args.indexDir):
+            raise FileExistsError(f"giraffe index (-o {args.indexDir}) already exists!")
+        if not os.path.isdir(os.path.dirname(args.indexDir)):
+            raise DirectoryNotFoundError(f"giraffe index (-o {args.indexDir}) is in a directory that does not exist!")
+    validate_sort_mem(args.sortMem)
+
+def validate_m_giraffe(args):
+    '''
+    Validation for arguments used in "map giraffe" mode. If a reads directory was given,
+    its samples are counted to determine the array job size.
+    '''
+    validate_program_dir(args, "vgDir", "vg", "--vg")
+    validate_giraffe_index(args, GIRAFFE_MAP_FILES)
+    
+    # Validate reads and count samples
+    samples = validate_reads(args, args.singleEnd)
+    args.numSamples = None
+    if samples != None:
+        args.numSamples = len(samples)
+        print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to map")
+    
+    # Validate behavioural parameters
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    validate_sort_mem(args.sortMem)
+
 def validate_m_rna(args):
     '''
     Validation for arguments common to all "map rna" mode commands.
@@ -771,11 +812,14 @@ def validate_bams(args):
 
     Parameters:
         args -- an argparse.Namespace containing args.bamDir and args.bamSuffix.
+    Returns:
+        samples -- a set of the sample names in the BAM files' read groups, or None if
+                   the BAM files were not located.
     '''
     if args.bamSuffix == "":
         raise ValueError("-bs must be given a non-empty value")
     if args.bamDir == None:
-        return
+        return None
     args.bamDir = os.path.abspath(args.bamDir)
     bamFiles = []
     if os.path.isdir(args.bamDir):
@@ -784,7 +828,7 @@ def validate_bams(args):
         if args.afterok:
             print(f"WARNING: no BAM files ending with '{args.bamSuffix}' are in -b {args.bamDir} yet; " +
                   "the --afterok job(s) must create them")
-            return
+            return None
         raise FileNotFoundError(f"No BAM files ending with '{args.bamSuffix}' were found in -b {args.bamDir}")
 
     # Check that BAMs are indexed, which may be done by a job this one depends on
@@ -812,22 +856,63 @@ def validate_bams(args):
     if noRG != []:
         print(f"WARNING: {len(noRG)} BAM file(s) have no read group samples, so bcftools will name " +
               f"samples by file name (e.g., {noRG[0]})")
+    return set(sampleFiles)
+
+def validate_giraffe_index(args, requiredFiles):
+    '''
+    Validation for the index directory of giraffe modes. If given, it must contain the
+    required files, unless the --afterok job(s) will create them.
+    
+    Parameters:
+        args -- an argparse.Namespace containing args.indexDir.
+        requiredFiles -- a list of file names which must be within the index directory.
+    '''
+    if args.indexDir == None:
+        return
+    args.indexDir = os.path.abspath(args.indexDir)
+    missing = [ f for f in requiredFiles if not os.path.isfile(os.path.join(args.indexDir, f)) ]
+    if missing != [] and args.afterok:
+        print(f"WARNING: giraffe index (-i {args.indexDir}) is incomplete; the --afterok job(s) must create it")
+    elif missing != []:
+        raise FileNotFoundError(f"giraffe index (-i {args.indexDir}) is missing {', '.join(missing)}; " +
+                                "create it with 'psst map index giraffe'")
 
 def validate_c(args):
     '''
     Validation for arguments common to all "call" mode commands (i.e., those added by
     add_call_arguments() in psst.py).
     '''
-    # Validate the reference genome, whose .fai index determines the contigs to call
-    validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
+    # Validate the reference genome, whose .fai index determines the contigs to call; for
+    # "call giraffe", it and the variant sites to genotype come from the giraffe index
+    args.targets, args.sites = "", "" # empty unless genotyping known variant sites
+    faiFile = None
+    if args.callMode == "giraffe":
+        args.genome = args.targets = args.sites = None
+        validate_giraffe_index(args, GIRAFFE_CALL_FILES)
+        if args.indexDir != None:
+            args.genome = os.path.join(args.indexDir, "reference.fa")
+            args.targets = os.path.join(args.indexDir, "targets.tsv.gz")
+            args.sites = os.path.join(args.indexDir, "sites.vcf.gz")
+            faiFile = args.genome + ".fai"
+    else:
+        validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
+        if "genome" in args.userSet:
+            faiFile = args.genome + ".fai"
+            if not os.path.isfile(faiFile):
+                raise FileNotFoundError(f"Reference genome (-r {args.genome}) is not indexed; " +
+                                        f"run 'samtools faidx' on it first ({faiFile} not found)")
     numContigs = None
-    if "genome" in args.userSet:
-        if not os.path.isfile(args.genome + ".fai"):
-            raise FileNotFoundError(f"Reference genome (-r {args.genome}) is not indexed; " +
-                                    f"run 'samtools faidx' on it first ({args.genome}.fai not found)")
-        with open(args.genome + ".fai", "r") as fileIn:
+    if faiFile != None and os.path.isfile(faiFile):
+        with open(faiFile, "r") as fileIn:
             numContigs = sum(1 for line in fileIn if line.strip() != "")
-    validate_bams(args)
+    
+    # Validate BAM files, whose samples must not share names with the variant sites' samples
+    bamSamples = validate_bams(args)
+    if bamSamples != None and args.sites != None and os.path.isfile(args.sites):
+        shared = sorted(bamSamples.intersection(get_vcf_samples(args.sites)))
+        if shared != []:
+            print(f"WARNING: sample(s) {', '.join(shared)} are also samples in {args.sites}; the " +
+                  "output will rename the latter (e.g., '2:" + shared[0] + "')")
 
     # Validate the number of chunks, which can't usefully exceed the number of contigs
     if args.chunks < 1:
@@ -836,8 +921,10 @@ def validate_c(args):
         print(f"Reducing --chunks from {args.chunks} to the genome's {numContigs} contig(s)")
         args.chunks = numContigs
 
-    # Validate the output prefix, derived from the reference genome if not given
-    if args.prefix == None and args.genome != None:
+    # Validate the output prefix, derived from the reference genome (or giraffe index) if not given
+    if args.prefix == None and args.callMode == "giraffe" and args.indexDir != None:
+        args.prefix = re.sub(r"_giraffe_index$", "", os.path.basename(args.indexDir))
+    elif args.prefix == None and args.genome != None:
         args.prefix = re.sub(r"\.(fasta|fa|fna|fas)$", "", os.path.basename(args.genome), flags=re.IGNORECASE)
     if args.prefix != None and re.match(r"^[^\s/]+$", args.prefix) == None:
         raise FormatError(f"-p '{args.prefix}' must not contain whitespace or '/'")
@@ -872,6 +959,12 @@ def validate_c(args):
 def validate_c_short(args):
     '''
     Validation for arguments used in "call short" mode.
+    '''
+    pass # all arguments are validated by validate_c()
+
+def validate_c_giraffe(args):
+    '''
+    Validation for arguments used in "call giraffe" mode.
     '''
     pass # all arguments are validated by validate_c()
 

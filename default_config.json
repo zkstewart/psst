@@ -13,7 +13,8 @@
         "salmon_dir": "/home/stewarz2/anaconda3/bin",
         "star_module": "STAR/2.7.11b",
         "minimap2_dir": "/home/stewarz2/various_programs/minimap2",
-        "chopper_dir": "/home/stewarz2/anaconda3/bin"
+        "chopper_dir": "/home/stewarz2/anaconda3/bin",
+        "vg_dir": "/home/stewarz2/anaconda3/envs/cactus/bin"
     },
     "databases": {
         "refseq_plant_fasta": "/home/stewarz2/various_programs/refseq_db/refseq_plant.protein.faa",

@@ -16,6 +16,10 @@ from .pbs import finalise_job
 # Files written alongside a FASTA file by 'bwa index'
 BWA_INDEX_SUFFIXES = [".amb", ".ann", ".bwt", ".pac", ".sa"]
 
+# Files within a 'map index giraffe' directory; the templates use these names too
+GIRAFFE_MAP_FILES = ["pangenome.gbz", "pangenome.dist", "pangenome.min", "pangenome.zipcodes"]
+GIRAFFE_CALL_FILES = ["reference.fa", "reference.fa.fai", "sites.vcf.gz", "targets.tsv.gz"]
+
 def get_array_size(numSamples):
     '''
     Parameters:
@@ -168,6 +172,48 @@ def map_nanopore(args):
         "minLength": args.minLength,
         "maxLength": args.maxLength,
         "minQual": args.minQual,
+        "cpus": args.cpus,
+        "sortMem": args.sortMem
+    }, arraySize=get_array_size(args.numSamples))
+
+def map_index_giraffe(args):
+    '''
+    Generates (and optionally submits) a PBS job script which prepares a pangenome graph
+    for read mapping with vg giraffe and variant calling with "call giraffe", creating
+    an index directory containing the graph, its giraffe indexes, the reference
+    sample's paths as a linear reference, and the pangenome's variant sites.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map index giraffe" arguments.
+    '''
+    finalise_job(args, "map/run_giraffe_index.sh", {
+        "vgDir": args.vgDir,
+        "gbz": args.gbz,
+        "vcf": args.vcf,
+        "refSample": args.refSample,
+        "indexDir": args.indexDir,
+        "cpus": args.cpus,
+        "sortMem": args.sortMem
+    })
+
+def map_giraffe(args):
+    '''
+    Generates (and optionally submits) a PBS array job script which maps short reads to
+    a pangenome graph with vg giraffe, projecting alignments onto the reference paths and
+    piping them through samtools to sort and mark duplicates. Each subjob maps one sample;
+    the array size is a placeholder if no reads directory was given, and no array is
+    requested if there is only one sample.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "map giraffe" arguments.
+    '''
+    finalise_job(args, "map/run_giraffe_map.sh", {
+        "vgDir": args.vgDir,
+        "indexDir": args.indexDir,
+        "readsDir": args.readsDir,
+        "readsSuffix": args.readsSuffix,
+        "paired": "false" if args.singleEnd else "true",
+        "outputDir": args.outputDir,
         "cpus": args.cpus,
         "sortMem": args.sortMem
     }, arraySize=get_array_size(args.numSamples))

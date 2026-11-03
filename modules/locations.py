@@ -35,6 +35,7 @@ SALMON_DIR = CONFIG["programs"]["salmon_dir"]
 STAR_MODULE = CONFIG["programs"]["star_module"]
 MINIMAP2_DIR = CONFIG["programs"]["minimap2_dir"]
 CHOPPER_DIR = CONFIG["programs"]["chopper_dir"]
+VG_DIR = CONFIG["programs"]["vg_dir"]
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = CONFIG["databases"]["refseq_plant_fasta"]

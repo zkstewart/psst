@@ -33,15 +33,15 @@ from modules.validation import \
     validate_bs, \
         validate_bs_download, validate_bs_prepare, validate_bs_archive, \
     validate_c, \
-        validate_c_short, validate_c_nanopore, \
+        validate_c_short, validate_c_giraffe, validate_c_nanopore, \
     validate_cl, \
         validate_cl_mmseqs2, validate_cl_cdhit, \
     validate_h, \
         validate_h_contacts, \
     validate_m, \
-        validate_m_short, validate_m_nanopore, \
+        validate_m_short, validate_m_giraffe, validate_m_nanopore, \
         validate_m_index, \
-            validate_m_index_bwa, validate_m_index_salmon, validate_m_index_star, \
+            validate_m_index_bwa, validate_m_index_salmon, validate_m_index_star, validate_m_index_giraffe, \
         validate_m_rna, \
             validate_m_rna_salmon, validate_m_rna_star, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
@@ -53,9 +53,9 @@ from modules.blast import blast_run_mmseqs2
 from modules.calling import call_variants
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
 from modules.hic import hic_contacts
-from modules.mapping import map_short, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
+from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
 from _version import __version__
@@ -399,7 +399,7 @@ def add_preset_arguments(parser):
                         default == '%(default)s'""",
                         default="asm20")
 
-def add_call_arguments(parser, bamSuffix, jobName, shortReads):
+def add_call_arguments(parser, bamSuffix, jobName, readType):
     '''
     Adds the arguments of "call" modes, which call variants jointly across BAM files
     with bcftools as a chunked array job followed by a concatenation job.
@@ -408,16 +408,25 @@ def add_call_arguments(parser, bamSuffix, jobName, shortReads):
         parser -- an argparse.ArgumentParser to add arguments to.
         bamSuffix -- a string of the default BAM file suffix, matching "map" outputs.
         jobName -- a string of the default PBS job name.
-        shortReads -- a boolean indicating whether to add the short read arguments
-                      (base quality, --hic and --indels-cns); nanopore modes leave
-                      these to the bcftools ont-sup profile.
+        readType -- a string of 'short', 'giraffe' or 'nanopore'; short read modes get
+                    base quality and --indels-cns arguments (which nanopore leaves to
+                    the bcftools ont-sup profile), and 'short' also gets --hic; giraffe
+                    takes its reference genome and variant sites from a giraffe index.
     '''
-    parser.add_argument("-r", "--reference", dest="genome",
-                        required=False,
-                        action=UserSet,
-                        help="""Optionally, specify the location of the reference genome FASTA file,
-                        which must be indexed with 'samtools faidx'; default == left as a placeholder""",
-                        default=None)
+    if readType == "giraffe":
+        parser.add_argument("-i", "--index", dest="indexDir",
+                            required=False,
+                            help="""Optionally, specify the index directory created by 'map index
+                            giraffe', whose reference paths and pangenome variant sites samples
+                            are genotyped against; default == left as a placeholder""",
+                            default=None)
+    else:
+        parser.add_argument("-r", "--reference", dest="genome",
+                            required=False,
+                            action=UserSet,
+                            help="""Optionally, specify the location of the reference genome FASTA file,
+                            which must be indexed with 'samtools faidx'; default == left as a placeholder""",
+                            default=None)
     parser.add_argument("-b", "--bamdir", dest="bamDir",
                         required=False,
                         help="""Optionally, specify the directory containing indexed BAM files to call
@@ -432,7 +441,7 @@ def add_call_arguments(parser, bamSuffix, jobName, shortReads):
     parser.add_argument("-p", "--prefix", dest="prefix",
                         required=False,
                         help="""Optionally, specify the prefix for output files; default == the
-                        reference genome file name without its extension if -r is given,
+                        reference genome (or giraffe index) name if -r (or -i) is given,
                         otherwise left as a placeholder""",
                         default=None)
     parser.add_argument("--outdir", dest="outputDir",
@@ -453,19 +462,21 @@ def add_call_arguments(parser, bamSuffix, jobName, shortReads):
                         help="""Optionally, specify the minimum MAPQ of alignments to use;
                         default == %(default)s""",
                         default=20)
-    if shortReads:
+    if readType in ["short", "giraffe"]:
         parser.add_argument("-Q", "--min-baseq", dest="minBaseQ",
                             required=False,
                             type=int,
                             help="""Optionally, specify the minimum base quality of bases to use;
                             default == %(default)s""",
                             default=20)
+    if readType == "short":
         parser.add_argument("--hic", dest="hic",
                             required=False,
                             action="store_true",
                             help="""Optionally, indicate that reads are Hi-C, which includes read pairs
                             not flagged as properly paired (as bwa mem -5SP doesn't flag them)""",
                             default=False)
+    if readType in ["short", "giraffe"]:
         parser.add_argument("--indels-cns", dest="indelsCns",
                             required=False,
                             action="store_true",
@@ -884,7 +895,17 @@ def main():
                                              help="""Call variants jointly from short read BAMs (e.g., from
                                              'map short') with bcftools""")
     cshortparser.set_defaults(func=call_variants)
-    add_call_arguments(cshortparser, bamSuffix=".sorted.md.bam", jobName="call_short", shortReads=True)
+    add_call_arguments(cshortparser, bamSuffix=".sorted.md.bam", jobName="call_short", readType="short")
+    
+    # Call > giraffe mode
+    cgiraffeparser = subCallParsers.add_parser("giraffe",
+                                               parents=[p],
+                                               add_help=False,
+                                               help="""Genotype short read BAMs from 'map giraffe' at every
+                                               pangenome variant site with bcftools, merged with the pangenome's
+                                               own genotypes""")
+    cgiraffeparser.set_defaults(func=call_variants)
+    add_call_arguments(cgiraffeparser, bamSuffix=".sorted.md.bam", jobName="call_giraffe", readType="giraffe")
     
     # Call > nanopore mode
     cnanoporeparser = subCallParsers.add_parser("nanopore",
@@ -893,7 +914,7 @@ def main():
                                                 help="""Call variants jointly from nanopore BAMs (e.g., from
                                                 'map nanopore') with bcftools' ont-sup profile""")
     cnanoporeparser.set_defaults(func=call_variants)
-    add_call_arguments(cnanoporeparser, bamSuffix=".sorted.bam", jobName="call_nanopore", shortReads=False)
+    add_call_arguments(cnanoporeparser, bamSuffix=".sorted.bam", jobName="call_nanopore", readType="nanopore")
 
     # Clustering subparser
     clparser = subparsers.add_parser("clustering",
@@ -1090,6 +1111,38 @@ def main():
     add_pbs_arguments(mshortparser, jobName="map_short",
                       walltime="24:00:00", mem="55G", cpus=8)
     
+    # Map > giraffe mode
+    mgiraffeparser = subMapParsers.add_parser("giraffe",
+                                              parents=[p],
+                                              add_help=False,
+                                              help="""Map short reads to a pangenome graph with vg giraffe, then sort and
+                                              mark duplicates (an array job with one subjob per sample)""")
+    mgiraffeparser.set_defaults(func=map_giraffe, scriptSuffix="map_giraffe")
+    mgiraffeparser.add_argument("-i", "--index", dest="indexDir",
+                                required=False,
+                                help="""Optionally, specify the index directory created by 'map index
+                                giraffe'; default == left as a placeholder""",
+                                default=None)
+    add_reads_arguments(mgiraffeparser, allowSingleEnd=True)
+    mgiraffeparser.add_argument("--outdir", dest="outputDir",
+                                required=False,
+                                help="""Optionally, specify the output directory, relative to the
+                                directory the job is submitted from; default == '%(default)s'""",
+                                default="mapped")
+    mgiraffeparser.add_argument("--sort-mem", dest="sortMem",
+                                required=False,
+                                help="""Optionally, specify the memory per samtools sort thread, which
+                                multiplied by --cpus should be well below --mem; default == '%(default)s'""",
+                                default="2G")
+    mgiraffeparser.add_argument("--vg", dest="vgDir",
+                                required=False,
+                                action=UserSet,
+                                help="""Optionally, specify the directory containing the vg executable;
+                                default == '%(default)s'""",
+                                default=VG_DIR)
+    add_pbs_arguments(mgiraffeparser, jobName="map_giraffe",
+                      walltime="24:00:00", mem="40G", cpus=8)
+    
     # Map > nanopore mode
     mnanoporeparser = subMapParsers.add_parser("nanopore",
                                                parents=[p],
@@ -1268,6 +1321,50 @@ def main():
                                   default=STAR_MODULE)
     add_pbs_arguments(mindexstarparser, jobName="star_index",
                       walltime="04:00:00", mem="50G", cpus=8)
+    
+    # Map > index > giraffe mode
+    mindexgiraffeparser = subMapIndexParsers.add_parser("giraffe",
+                                                        parents=[p],
+                                                        add_help=False,
+                                                        help="""Prepare a pangenome graph and its variants for 'map giraffe'
+                                                        and 'call giraffe'""")
+    mindexgiraffeparser.set_defaults(func=map_index_giraffe, scriptSuffix="giraffe_index")
+    mindexgiraffeparser.add_argument("-g", "--gbz", dest="gbz",
+                                     required=False,
+                                     action=UserSet,
+                                     help="""Optionally, specify the location of the pangenome graph GBZ file
+                                     (e.g., cactus-pangenome's .d2.gbz); default == left as a placeholder""",
+                                     default=None)
+    mindexgiraffeparser.add_argument("--vcf", dest="vcf",
+                                     required=False,
+                                     action=UserSet,
+                                     help="""Optionally, specify the location of the pangenome's variants VCF
+                                     (e.g., cactus-pangenome's .wave.vcf.gz); default == left as a placeholder""",
+                                     default=None)
+    mindexgiraffeparser.add_argument("--refsample", dest="refSample",
+                                     required=False,
+                                     help="""Optionally, specify the sample whose paths form the linear
+                                     reference; default == the graph's only reference sample""",
+                                     default="")
+    mindexgiraffeparser.add_argument("-o", "--index", dest="indexDir",
+                                     required=False,
+                                     help="""Optionally, specify the index directory to create; default ==
+                                     '<gbz without .gbz>_giraffe_index' if -g is given, otherwise left as
+                                     a placeholder""",
+                                     default=None)
+    mindexgiraffeparser.add_argument("--sort-mem", dest="sortMem",
+                                     required=False,
+                                     help="""Optionally, specify the memory for bcftools sort, which should
+                                     be well below --mem; default == '%(default)s'""",
+                                     default="4G")
+    mindexgiraffeparser.add_argument("--vg", dest="vgDir",
+                                     required=False,
+                                     action=UserSet,
+                                     help="""Optionally, specify the directory containing the vg executable;
+                                     default == '%(default)s'""",
+                                     default=VG_DIR)
+    add_pbs_arguments(mindexgiraffeparser, jobName="giraffe_index",
+                      walltime="12:00:00", mem="60G", cpus=8)
     
     # Map > rna subparser
     mrnaparser = subMapParsers.add_parser("rna",
@@ -1469,6 +1566,9 @@ def cmain(args):
     if args.callMode == "short":
         print("## bcftools short read variant calling ##")
         validate_c_short(args)
+    if args.callMode == "giraffe":
+        print("## bcftools pangenome variant genotyping ##")
+        validate_c_giraffe(args)
     if args.callMode == "nanopore":
         print("## bcftools nanopore variant calling ##")
         validate_c_nanopore(args)
@@ -1493,6 +1593,9 @@ def mmain(args):
     if args.mapMode == "short":
         print("## bwa mem short read mapping ##")
         validate_m_short(args)
+    if args.mapMode == "giraffe":
+        print("## vg giraffe pangenome read mapping ##")
+        validate_m_giraffe(args)
     if args.mapMode == "nanopore":
         print("## minimap2 nanopore read mapping ##")
         validate_m_nanopore(args)
@@ -1507,6 +1610,9 @@ def mmain(args):
         if args.mapIndexMode == "star":
             print("## STAR genome indexing ##")
             validate_m_index_star(args)
+        if args.mapIndexMode == "giraffe":
+            print("## vg giraffe pangenome indexing ##")
+            validate_m_index_giraffe(args)
     if args.mapMode == "rna":
         validate_m_rna(args)
         if args.mapRnaMode == "salmon":

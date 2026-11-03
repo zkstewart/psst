@@ -8,6 +8,10 @@ GENOME=@@genome@@
 BAMDIR=@@bamDir@@
 SUFFIX=@@bamSuffix@@
 
+# Specify known alleles to genotype samples at (CHROM, POS and REF,ALT columns, as made by
+# 'psst map index giraffe'); empty to call variants anywhere
+TARGETS=@@targets@@
+
 # Specify the output directory and the prefix for output files
 OUTDIR=@@outputDir@@
 PREFIX=@@prefix@@
@@ -77,15 +81,27 @@ fi
 # STEP 4: Pileup, call and normalise variants without intermediate files, giving the
 # output its final name once complete; norm left-aligns indels and trims redundant bases
 MPILEUPARGS=()
+ANNOTATIONS=FORMAT/AD,FORMAT/DP,FORMAT/SP,INFO/AD
+CALLARGS=( -v ) # variant sites only
+NORMARGS=()
 [[ -n ${PROFILE} ]] && MPILEUPARGS+=( -X ${PROFILE} ) # first, so later options override it
 MPILEUPARGS+=( -q ${MINMAPQ} -d ${MAXDEPTH} )
 [[ -n ${MINBASEQ} ]] && MPILEUPARGS+=( -Q ${MINBASEQ} )
 [[ ${ORPHANS} == "true" ]] && MPILEUPARGS+=( -A )
 [[ ${INDELSCNS} == "true" ]] && MPILEUPARGS+=( --indels-cns )
+if [[ -n ${TARGETS} ]]; then
+    # Genotype every target allele, including where all samples are homozygous for the
+    # reference (-A), then split records to match the biallelic target sites; INFO/AD is
+    # omitted since call doesn't update it to the target alleles
+    ANNOTATIONS=FORMAT/AD,FORMAT/DP,FORMAT/SP
+    MPILEUPARGS+=( -T "${TARGETS}" )
+    CALLARGS=( -C alleles -T "${TARGETS}" -A )
+    NORMARGS=( -m -any )
+fi
 TMPVCF=${CHUNKDIR}/chunk_${CHUNK}.incomplete.vcf.gz
 bcftools mpileup -f "${GENOME}" -R "${REGIONS}" "${MPILEUPARGS[@]}" \
-    -a FORMAT/AD,FORMAT/DP,FORMAT/SP,INFO/AD -Ou "${BAMS[@]}" \
-    | bcftools call -m -v --ploidy ${PLOIDY} -a GQ,GP -Ou \
-    | bcftools norm -f "${GENOME}" --threads $(( CPUS - 1 )) -Oz -o "${TMPVCF}"
+    -a ${ANNOTATIONS} -Ou "${BAMS[@]}" \
+    | bcftools call -m "${CALLARGS[@]}" --ploidy ${PLOIDY} -a GQ,GP -Ou \
+    | bcftools norm -f "${GENOME}" "${NORMARGS[@]}" --threads $(( CPUS - 1 )) -Oz -o "${TMPVCF}"
 mv "${TMPVCF}" "${CHUNKVCF}"
 rm "${REGIONS}"
