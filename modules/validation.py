@@ -16,6 +16,7 @@ import glob, os, re, shutil
 from .basecalling import DORADO_SCRIPTS
 from .calling import BAM_INDEX_SUFFIXES, get_bam_samples, get_vcf_samples
 from .mapping import BWA_INDEX_SUFFIXES, GIRAFFE_MAP_FILES, GIRAFFE_CALL_FILES
+from .pangenome import group_haplotypes, name_genomes, parse_seqfile, seqfile_name
 from .config import CONFIG, RPID_REGEX
 from .reads import get_read_files
 
@@ -186,6 +187,98 @@ def validate_job_name(jobName, flag="--name"):
     if re.match(r"^[A-Za-z0-9_+][^\s@#]*$", jobName) == None:
         raise FormatError(f"{flag} '{jobName}' must start with a letter, number, '_' or '+' and " +
                           "not contain whitespace, '@' or '#'")
+
+def validate_pg(args):
+    '''
+    Validation for arguments common to all "pangenome" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_pg_create(args):
+    '''
+    Validation for arguments used in "pangenome create" mode. Sets args.seqNames and
+    args.genomeFiles to the seqfile's names and FASTA files (or None to leave them as
+    placeholders), and args.maxMemory for cactus.
+    '''
+    # Collect the genomes as (sample, haplotype, FASTA) entries from --seqfile or -i, where
+    # the reference's haplotype is None
+    entries = None
+    if args.seqFile != None:
+        for flag, given in [("-i", args.genomeFiles != None), ("--haploid", args.haploid)]:
+            if given:
+                raise ValueError(f"{flag} cannot be given with --seqfile")
+        args.seqFile = os.path.abspath(args.seqFile)
+        if not os.path.isfile(args.seqFile):
+            raise FileNotFoundError(f"Seqfile (--seqfile {args.seqFile}) does not exist!")
+        entries = parse_seqfile(args.seqFile)
+        for sample, haplotype, fastaFile in entries:
+            if not os.path.isfile(fastaFile):
+                raise FileNotFoundError(f"Genome FASTA file '{fastaFile}' of '{seqfile_name(sample, haplotype)}' " +
+                                        f"in --seqfile {args.seqFile} does not exist!")
+        refEntries = [ i for i, (sample, _, _) in enumerate(entries) if sample == args.refName ]
+        if refEntries == []:
+            raise ValueError(f"Reference '{args.refName}' is not a sample in --seqfile {args.seqFile}; " +
+                             "give its name with --refname")
+        if len(refEntries) != 1 or entries[refEntries[0]][1] != 0:
+            raise ValueError(f"Reference '{args.refName}' must be a single haploid genome, as cactus requires")
+        entries[refEntries[0]] = (args.refName, None, entries[refEntries[0]][2])
+    elif args.genomeFiles != None:
+        args.genomeFiles = [ os.path.abspath(genomeFile) for genomeFile in args.genomeFiles ]
+        for genomeFile in args.genomeFiles:
+            if not os.path.isfile(genomeFile):
+                raise FileNotFoundError(f"Genome FASTA file (-i {genomeFile}) does not exist!")
+        if len(set(args.genomeFiles)) != len(args.genomeFiles):
+            raise ValueError("The same file was given more than once to -i")
+        entries = name_genomes(group_haplotypes(args.genomeFiles, args.haploid), args.refName)
+    elif args.haploid:
+        raise ValueError("--haploid is only used with -i")
+    
+    # Validate sample names
+    if re.match(r"^[^\s#]+$", args.refName) == None or re.search(r"\.\d+$", args.refName) != None:
+        raise FormatError(f"--refname '{args.refName}' must not contain whitespace or '#', or end in " +
+                          "'.<number>' (which cactus reads as a haplotype number)")
+    if entries != None:
+        names = [ seqfile_name(sample, haplotype) for sample, haplotype, _ in entries ]
+        for sample, _, fastaFile in entries:
+            if re.match(r"^[^\s#]+$", sample) == None:
+                raise FormatError(f"Sample name '{sample}' must not contain whitespace or '#'; rename " +
+                                  "its file or use --seqfile")
+            if re.search(r"\s", fastaFile) != None:
+                raise FormatError(f"Genome FASTA file '{fastaFile}' must not contain whitespace, which a " +
+                                  "cactus seqfile cannot hold")
+        duplicates = sorted(set([ n for n in names if names.count(n) > 1 ]))
+        if duplicates != []:
+            raise ValueError(f"Genome name(s) {', '.join(duplicates)} occur more than once")
+        mixed = sorted(set([ s for s, h, _ in entries if h == 0 ]).intersection([ s for s, h, _ in entries if h not in [0, None] ]))
+        if mixed != []:
+            raise ValueError(f"Sample(s) {', '.join(mixed)} are given as both haploid and haplotype-resolved")
+        if len(entries) < 2:
+            raise ValueError("At least 2 genomes are needed to build a pangenome")
+        
+        # Show how genomes were named, since haplotypes are grouped from file names
+        print("# Genomes will be named in the seqfile as:")
+        width = max([ len(n) for n in names ]) + 2
+        for name, (_, _, fastaFile) in zip(names, entries):
+            print(f"#   {name:<{width}}{fastaFile}")
+        args.seqNames = names
+        args.genomeFiles = [ fastaFile for _, _, fastaFile in entries ]
+    else:
+        args.seqNames = None
+    
+    # Validate output locations; resubmitting the job resumes cactus in an existing --outdir
+    if re.match(r"^[^\s/]+$", args.prefix) == None:
+        raise FormatError(f"-p '{args.prefix}' must not contain whitespace or '/'")
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if os.path.exists(args.outputDir):
+        raise FileExistsError(f"Output directory (--outdir {os.path.abspath(args.outputDir)}) already exists!")
+    
+    # Validate cactus parameters, giving Toil a memory limit since it would otherwise
+    # size itself from the whole node
+    if re.match(r"^\S+$", args.condaEnv) == None:
+        raise FormatError(f"--conda '{args.condaEnv}' must be non-empty and not contain whitespace")
+    args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
+    args.maxMemory = f"{int(parse_mem_gb(args.mem))}G"
 
 def validate_pbs_submission(args):
     '''

@@ -7,6 +7,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.calling import get_bam_samples, get_vcf_samples
 from modules.mapping import get_array_size
+from modules.pangenome import group_haplotypes, name_genomes, parse_seqfile, seqfile_name
 from modules.pbs import fill_template, format_pbs_header, q
 from modules.reads import get_read_files
 from modules.validation import parse_mem_gb
@@ -91,3 +92,58 @@ def test_q_quotes_lists_item_by_item():
     assert q("plain") == "plain"
     assert q(["a.fa", "my file.fa", "it's.fa"]) == """a.fa 'my file.fa' 'it'"'"'s.fa'"""
     assert q(2) == "2"
+
+@pytest.mark.parametrize("files,expected", [
+    (["Busk.hap1.fasta", "Busk.hap2.fasta"], [("Busk", [1, 2])]),
+    (["x/A_1.fa.gz", "x/A_2.fa.gz", "x/A_3.fa.gz", "x/A_4.fa.gz"], [("A", [1, 2, 3, 4])]), # any ploidy
+    (["14Q021.hap1.fasta", "14Q021.hap2.fasta", "18Q053.fasta"], [("14Q021", [1, 2]), ("18Q053", [0])]),
+    (["s.asm.bp.hap1.p_ctg.fa", "s.asm.bp.hap2.p_ctg.fa"], [("s.asm.bp", [1, 2])]), # text may follow the number
+    (["P1.h1.fa", "P1.h2.fa", "P2.h1.fa", "P2.h2.fa"], [("P1", [1, 2]), ("P2", [1, 2])]), # only one number may differ
+    (["A.hap2.fa", "A.hap1.fa"], [("A", [2, 1])]), # numbered by name, not order
+    (["A.hap1.fa", "B.fa", "A.hap2.fa"], [("A.hap1", [0]), ("B", [0]), ("A.hap2", [0])]), # must be consecutive
+    (["A.hap1.fa", "A.hap01.fa"], [("A.hap1", [0]), ("A.hap01", [0])]), # the same number isn't a haplotype
+    (["iso1.fa", "iso2.fa"], [("iso", [1, 2])]), # unavoidably grouped; see --haploid
+])
+def test_group_haplotypes(files, expected):
+    samples = group_haplotypes(files)
+    assert [ (sample, [ h for h, _ in haplotypes ]) for sample, haplotypes in samples ] == expected
+    assert [ f for _, haplotypes in samples for _, f in haplotypes ] == files
+
+def test_group_haplotypes_haploid():
+    assert group_haplotypes(["iso1.fa", "iso2.fa"], haploid=True) == [("iso1", [(0, "iso1.fa")]), ("iso2", [(0, "iso2.fa")])]
+
+@pytest.mark.parametrize("files,message", [
+    (["1.fa", "2.fa"], "have no sample name"),
+    (["hap1.fa", "hap2.fa"], "have no sample name"),
+    (["A.hap0.fa", "A.hap1.fa"], "distinct haplotype numbers >= 1"),
+])
+def test_group_haplotypes_errors(files, message):
+    with pytest.raises(ValueError, match=message):
+        group_haplotypes(files)
+
+def test_seqfile_names():
+    assert seqfile_name("reference", None) == "reference"
+    assert seqfile_name("18Q049", 0) == "18Q049.0"
+    assert seqfile_name("13Q019", 2) == "13Q019.2"
+
+@pytest.mark.parametrize("files,expected", [
+    (["s.hap1.fa", "s.hap2.fa", "o.hap1.fa", "o.hap2.fa"], ["reference", "s.0", "o.1", "o.2"]), # diploid reference
+    (["s.hap1.fa", "s.hap2.fa", "s.hap3.fa", "o.hap1.fa", "o.hap2.fa", "o.hap3.fa"],
+     ["reference", "s.1", "s.2", "o.1", "o.2", "o.3"]), # triploid reference; the rest are renumbered
+    (["ref.fa", "o.hap1.fa", "o.hap2.fa", "iso.fa"], ["reference", "o.1", "o.2", "iso.0"]), # haploid reference
+    (["s.hap2.fa", "s.hap1.fa", "o.fa"], ["reference", "s.0", "o.0"]), # the first file listed is the reference
+])
+def test_name_genomes(files, expected):
+    entries = name_genomes(group_haplotypes(files), "reference")
+    assert [ seqfile_name(sample, haplotype) for sample, haplotype, _ in entries ] == expected
+    assert [ f for _, _, f in entries ] == files
+
+def test_parse_seqfile(tmp_path):
+    (tmp_path / "seqfile.txt").write_text("reference       /g/18Q049.hap2.fasta\n18Q049.0        /g/18Q049.hap1.fasta\n" +
+                                          "13Q019.1\t/g/13Q019.hap1.fasta\n\n13Q019#2\trel.fa\nv1.5.2 /g/v.fa\n")
+    assert parse_seqfile(str(tmp_path / "seqfile.txt")) == [
+        ("reference", 0, "/g/18Q049.hap2.fasta"), ("18Q049", 0, "/g/18Q049.hap1.fasta"),
+        ("13Q019", 1, "/g/13Q019.hap1.fasta"), ("13Q019", 2, os.path.abspath("rel.fa")), ("v1.5", 2, "/g/v.fa") ]
+    (tmp_path / "bad.txt").write_text("a b c\n")
+    with pytest.raises(ValueError, match="must have 2 columns"):
+        parse_seqfile(str(tmp_path / "bad.txt"))

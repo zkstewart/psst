@@ -44,6 +44,8 @@ from modules.validation import \
             validate_m_index_bwa, validate_m_index_salmon, validate_m_index_star, validate_m_index_giraffe, \
         validate_m_rna, \
             validate_m_rna_salmon, validate_m_rna_star, \
+    validate_pg, \
+        validate_pg_create, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
@@ -53,9 +55,10 @@ from modules.blast import blast_run_mmseqs2
 from modules.calling import call_variants, call_filter
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
 from modules.hic import hic_contacts
+from modules.pangenome import pangenome_create
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
     REFERENCE_FASTA
 from _version import __version__
@@ -1155,6 +1158,88 @@ def main():
     add_pbs_arguments(hcparser, jobName="hic_contacts",
                       walltime="48:00:00", mem="80G", cpus=16)
     
+    # Pangenome subparser
+    pgparser = subparsers.add_parser("pangenome",
+                                     parents=[p],
+                                     add_help=False,
+                                     help="Pangenome graph jobs")
+    
+    subPangenomeParsers = pgparser.add_subparsers(dest="pangenomeMode",
+                                                  required=True)
+    
+    # Pangenome > create mode
+    pgcreateparser = subPangenomeParsers.add_parser("create",
+                                                    parents=[p],
+                                                    add_help=False,
+                                                    help="""Build a pangenome graph of genomes with cactus-pangenome,
+                                                    with a VCF against the reference and giraffe indexes""")
+    pgcreateparser.set_defaults(func=pangenome_create, scriptSuffix="pangenome")
+    pgcreateparser.add_argument("-i", "--input", dest="genomeFiles",
+                                required=False,
+                                nargs="+",
+                                metavar="FASTA",
+                                help="""Optionally, specify the genome FASTA files to build the pangenome
+                                from, the first being the reference, which should be chromosome scale;
+                                consecutive files named alike except for one number are haplotypes of
+                                one sample (e.g., 'Busk.hap1.fasta' 'Busk.hap2.fasta'), and other files
+                                are haploid samples; default == left as a placeholder""",
+                                default=None)
+    pgcreateparser.add_argument("--refname", dest="refName",
+                                required=False,
+                                help="""Optionally, specify the name to give the reference (the first -i
+                                file), or the name of the reference in a --seqfile; default == '%(default)s'""",
+                                default="reference")
+    pgcreateparser.add_argument("--haploid", dest="haploid",
+                                required=False,
+                                action="store_true",
+                                help="""Optionally, treat every -i file as a haploid sample rather than
+                                grouping haplotypes by file name""",
+                                default=False)
+    pgcreateparser.add_argument("--seqfile", dest="seqFile",
+                                required=False,
+                                help="""Optionally, specify an existing cactus seqfile of '<name> <FASTA>'
+                                lines (names being 'SAMPLE', or 'SAMPLE.N' for haplotype N, where 0 is
+                                haploid) instead of -i""",
+                                default=None)
+    pgcreateparser.add_argument("-p", "--prefix", dest="prefix",
+                                required=False,
+                                help="""Optionally, specify the prefix for output files;
+                                default == '%(default)s'""",
+                                default="pangenome")
+    pgcreateparser.add_argument("--outdir", dest="outputDir",
+                                required=False,
+                                help="""Optionally, specify the output directory, relative to the
+                                directory the job is submitted from; it will hold the seqfile, cactus's
+                                job store and, in 'graph', its outputs; default == '%(default)s'""",
+                                default="cactus_output")
+    pgcreateparser.add_argument("--giraffe", dest="giraffe",
+                                required=False,
+                                choices=["filter", "clip", "full"],
+                                help="""Optionally, specify which graph to make giraffe indexes of: 'filter'
+                                keeps nodes in at least 2 haplotypes (making '.d2' files), 'clip' keeps
+                                all but long unaligned sequence, and 'full' keeps everything;
+                                default == '%(default)s'""",
+                                default="filter")
+    pgcreateparser.add_argument("--no-vcfwave", dest="noVcfwave",
+                                required=False,
+                                action="store_true",
+                                help="""Optionally, skip realigning the VCF's alleles with vcfwave into
+                                SNPs and indels ('.wave.vcf.gz')""",
+                                default=False)
+    pgcreateparser.add_argument("--binaries", dest="binariesMode",
+                                required=False,
+                                choices=["singularity", "docker", "local"],
+                                help="""Optionally, specify how cactus runs its tools;
+                                default == '%(default)s'""",
+                                default="singularity")
+    pgcreateparser.add_argument("--conda", dest="condaEnv",
+                                required=False,
+                                help="""Optionally, specify the conda environment containing
+                                cactus-pangenome; default == '%(default)s'""",
+                                default=CACTUS_CONDA_ENV)
+    add_pbs_arguments(pgcreateparser, jobName="cactus",
+                      walltime="32:00:00", mem="120G", cpus=16)
+    
     # Map subparser
     mparser = subparsers.add_parser("map",
                                     parents=[p],
@@ -1587,6 +1672,10 @@ def main():
         print("## psst.py - Hi-C handling ##")
         validate_h(args)
         hmain(args)
+    if args.mode == "pangenome":
+        print("## psst.py - Pangenome handling ##")
+        validate_pg(args)
+        pgmain(args)
     if args.mode == "map":
         print("## psst.py - Read mapping handling ##")
         validate_m(args)
@@ -1709,6 +1798,12 @@ def mmain(args):
         if args.mapRnaMode == "star":
             print("## STAR RNAseq mapping ##")
             validate_m_rna_star(args)
+
+def pgmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.pangenomeMode == "create":
+        print("## cactus-pangenome graph creation ##")
+        validate_pg_create(args)
 
 if __name__ == "__main__":
     main()

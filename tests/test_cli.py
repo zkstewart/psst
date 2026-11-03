@@ -120,6 +120,13 @@ def inputs(tmp_path):
     (files["phased"] / "phase").mkdir(parents=True)
     (files["phased"] / "phase" / "phasing.tsv").write_text("")
     (files["phased"] / "partition1.fasta").write_text("")
+    files["genomes"] = tmp_path / "genomes"
+    files["genomes"].mkdir()
+    for name in ["ref.fa", "A.hap1.fa", "A.hap2.fa", "B.fa", "v1.2.fa", "A.fa"]:
+        (files["genomes"] / name).write_text(">c\nACGT\n")
+    files["seqfile"] = tmp_path / "seqfile.txt"
+    files["seqfile"].write_text(f"A.1\t{files['genomes']}/A.hap1.fa\nref\t{files['genomes']}/ref.fa\n" +
+                                f"B.0\t{files['genomes']}/B.fa\n")
     files["vgdir"] = tmp_path / "vgdir"
     files["vgdir"].mkdir()
     (files["vgdir"] / "vg").write_text("")
@@ -161,6 +168,23 @@ VALIDATION_ERRORS = [
     (["call", "filter", "--mac", "-1"], "--mac must be >= 0"),
     (["call", "filter", "--maf", "0.6"], "--maf must be greater than 0 and at most 0.5"),
     (["call", "filter", "--maf", "0"], "--maf must be greater than 0 and at most 0.5"),
+    # pangenome modes
+    (["pangenome", "create", "-i", "{genomes}/B.fa", "--seqfile", "{seqfile}"], "-i cannot be given with --seqfile"),
+    (["pangenome", "create", "--haploid", "--seqfile", "{seqfile}"], "--haploid cannot be given with --seqfile"),
+    (["pangenome", "create", "--haploid"], "--haploid is only used with -i"),
+    (["pangenome", "create", "--seqfile", "{seqfile}.missing"], "Seqfile (--seqfile"),
+    (["pangenome", "create", "--seqfile", "{seqfile}"], "Reference 'reference' is not a sample"),
+    (["pangenome", "create", "--seqfile", "{seqfile}", "--refname", "A"], "Reference 'A' must be a single haploid genome"),
+    (["pangenome", "create", "-i", "{genomes}/missing.fa"], "Genome FASTA file (-i"),
+    (["pangenome", "create", "-i", "{genomes}/ref.fa", "{genomes}/ref.fa"], "given more than once"),
+    (["pangenome", "create", "-i", "{genomes}/ref.fa"], "At least 2 genomes"),
+    (["pangenome", "create", "-i", "{genomes}/ref.fa", "{genomes}/A.hap1.fa", "{genomes}/A.hap2.fa",
+      "{genomes}/A.fa"], "given as both haploid and haplotype-resolved"),
+    (["pangenome", "create", "-i", "{genomes}/ref.fa", "{genomes}/B.fa", "--refname", "B.0"], "end in '.<number>'"),
+    (["pangenome", "create", "-i", "{genomes}/ref.fa", "{genomes}/B.fa", "--refname", "a#b"], "must not contain whitespace or '#'"),
+    (["pangenome", "create", "--outdir", "{genomes}"], "already exists"),
+    (["pangenome", "create", "-p", "a/b"], "must not contain whitespace or '/'"),
+    (["pangenome", "create", "--giraffe", "d2"], "invalid choice"),
     # map modes
     (["map", "short", "--hic", "--singleEnd"], "--hic and --singleEnd are mutually exclusive"),
     (["map", "short", "-r", "{nofai}"], "run 'bwa index' on it first"),
@@ -230,6 +254,19 @@ def test_assembly_phases_by_default(tmp_path):
     assert "CONTIGS=( @@contigFiles@@ )" in text
     assert "PHASEDIR=''\n" in text # empty phases the contigs
     assert "PLOIDY=3\n" in text
+
+def test_pangenome_names_genomes(inputs, tmp_path):
+    g = inputs["genomes"]
+    result = run_psst(["pangenome", "create", "-i", f"{g}/A.hap1.fa", f"{g}/A.hap2.fa", f"{g}/v1.2.fa", f"{g}/B.fa",
+                       "--mem", "100gb"], tmp_path)
+    assert f"#   reference  {g}/A.hap1.fa" in result.stdout # the naming is shown
+    text = open(tmp_path / "pangenome.sh").read()
+    assert "NAMES=( reference A.0 v1.2.0 B.0 )\n" in text
+    assert f"GENOMES=( {g}/A.hap1.fa {g}/A.hap2.fa {g}/v1.2.fa {g}/B.fa )\n" in text
+    assert "REFERENCE=reference\n" in text and "MAXMEMORY=100G\n" in text
+    run_psst(["pangenome", "create", "--seqfile", inputs["seqfile"], "--refname", "ref", "--script", "s.sh"], tmp_path)
+    text = open(tmp_path / "s.sh").read()
+    assert "NAMES=( A.1 ref B.0 )\n" in text and "REFERENCE=ref\n" in text
 
 def test_call_short_hic_sets_orphans(tmp_path):
     run_psst(["call", "short", "--hic"], tmp_path)

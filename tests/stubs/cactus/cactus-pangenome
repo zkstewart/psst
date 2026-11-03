@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+# A stand-in for cactus-pangenome which lets the "pangenome create" job script be tested
+# without cactus. Every invocation is logged to $STUB_DIR/cactus.log as one line of
+# arguments joined by '|', and its seqfile is copied to $STUB_DIR/seqfile.txt; then, as
+# Toil would, it fails if its job store exists without --restart (or vice versa) and
+# creates the job store. It then fails if $STUB_FAIL is set, or else removes the job store
+# and writes <outDir>/<outName>.d2.gbz.
+
+import os, shutil, sys
+
+args = sys.argv[1:]
+jobStore, seqFile = args[0], args[1]
+stubDir = os.environ["STUB_DIR"]
+with open(os.path.join(stubDir, "cactus.log"), "a") as fileOut:
+    fileOut.write("|".join(args) + "\n")
+shutil.copy(seqFile, os.path.join(stubDir, "seqfile.txt"))
+
+if os.path.exists(jobStore) != ("--restart" in args):
+    print("job store existence does not match --restart")
+    sys.exit(1)
+os.makedirs(jobStore, exist_ok=True)
+if os.environ.get("STUB_FAIL"):
+    sys.exit(1)
+shutil.rmtree(jobStore)
+outDir = args[args.index("--outDir") + 1]
+os.makedirs(outDir, exist_ok=True)
+open(os.path.join(outDir, args[args.index("--outName") + 1] + ".d2.gbz"), "w").close()

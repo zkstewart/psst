@@ -11,6 +11,7 @@
         "paf2dotplot_dir": "/home/stewarz2/various_programs/paf2dotplot",
         "threeddna_dir": "/home/stewarz2/various_programs/3d-dna",
         "pairtools_conda_env": "hic",
+        "cactus_conda_env": "cactus",
         "salmon_dir": "/home/stewarz2/anaconda3/bin",
         "star_module": "STAR/2.7.11b",
         "minimap2_dir": "/home/stewarz2/various_programs/minimap2",

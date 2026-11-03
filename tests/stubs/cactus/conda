@@ -1,0 +1,3 @@
+#!/bin/bash
+# A stand-in for conda, so that job scripts' 'conda activate' succeeds without the environment
+exit 0
