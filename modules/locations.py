@@ -23,6 +23,7 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 # Program locations on the HPC
 MMSEQS_DIR = CONFIG["programs"]["mmseqs_dir"]
 VARSCRIPT_DIR = CONFIG["programs"]["various_scripts_dir"]
+ANNOTARIUM_DIR = CONFIG["programs"]["annotarium_dir"]
 GENSCRIPT_DIR = CONFIG["programs"]["genome_analysis_scripts_dir"]
 COMPLEASM_DIR = CONFIG["programs"]["compleasm_dir"]
 DORADO_DIR = CONFIG["programs"]["dorado_dir"]
@@ -44,5 +45,4 @@ IDMAPPING_FILE = CONFIG["databases"]["uniref_idmapping_file"]
 OBO_FILE = CONFIG["databases"]["go_obo_file"]
 
 # Reference genome locations on the HPC
-REFERENCE_HAP1_FASTA = CONFIG["references"]["reference_hap1_fasta"]
-REFERENCE_HAP2_FASTA = CONFIG["references"]["reference_hap2_fasta"]
+REFERENCE_FASTA = CONFIG["references"]["reference_fasta"]

@@ -54,10 +54,10 @@ from modules.calling import call_variants, call_filter
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
 from modules.hic import hic_contacts
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
-from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
+from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
     THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
-    REFERENCE_HAP1_FASTA, REFERENCE_HAP2_FASTA
+    REFERENCE_FASTA
 from _version import __version__
 
 # Argument conventions:
@@ -379,25 +379,65 @@ def add_reads_arguments(parser, allowSingleEnd):
                             help="""Optionally, indicate that reads are single-end rather than paired""",
                             default=False)
 
-def add_preset_arguments(parser):
+def add_phase_arguments(parser):
     '''
-    Adds output directory and minimap2 preset arguments to a leaf subparser for
-    Various_scripts/assembly pipelines that share these behavioural parameters.
+    Adds the arguments of assembly modes which partition contigs into haplotypes against
+    a reference with annotarium's 'assembly phase' (or reuse an earlier phasing), then
+    process each partition with another annotarium 'assembly' mode.
     
     Parameters:
         parser -- an argparse.ArgumentParser to add arguments to.
     '''
+    parser.add_argument("-i", "--input", dest="contigFiles",
+                        required=False,
+                        nargs="+",
+                        metavar="FASTA",
+                        help="""Optionally, specify the contig FASTA file(s) to phase (e.g.,
+                        hifiasm's hap1 and hap2 contigs); default == left as a placeholder""",
+                        default=None)
+    parser.add_argument("-r", "--reference", dest="refGenome",
+                        required=False,
+                        action=UserSet,
+                        help="""Optionally, specify the location of the reference genome FASTA file;
+                        default == '%(default)s'""",
+                        default=REFERENCE_FASTA)
+    parser.add_argument("--phase", dest="phaseDir",
+                        required=False,
+                        help="""Optionally, specify an existing annotarium 'assembly phase' output
+                        directory, made from the same -i and -r files, to skip phasing;
+                        default == phase contigs into '<outdir>/phase'""",
+                        default=None)
+    parser.add_argument("--ploidy", dest="ploidy",
+                        required=False,
+                        type=int,
+                        action=UserSet,
+                        help="""Optionally, specify the number of haplotype partitions to phase
+                        contigs into; default == %(default)s""",
+                        default=2)
+    parser.add_argument("--preset", dest="preset",
+                        required=False,
+                        choices=["asm5", "asm10", "asm20"],
+                        action=UserSet,
+                        help="""Optionally, specify the minimap2 alignment preset;
+                        default == '%(default)s'""",
+                        default="asm20")
     parser.add_argument("--outdir", dest="outputDir",
                         required=False,
                         help="""Optionally, specify the output directory, relative to the
                         directory the job is submitted from; default == '%(default)s'""",
                         default="output")
-    parser.add_argument("--preset", dest="preset",
+    parser.add_argument("--annotarium", dest="annotariumDir",
                         required=False,
-                        choices=["asm5", "asm10", "asm20"],
-                        help="""Optionally, specify the minimap2 alignment preset;
+                        action=UserSet,
+                        help="""Optionally, specify the location of the annotarium repository;
                         default == '%(default)s'""",
-                        default="asm20")
+                        default=ANNOTARIUM_DIR)
+    parser.add_argument("--minimap2", dest="minimap2Dir",
+                        required=False,
+                        action=UserSet,
+                        help="""Optionally, specify the directory containing the minimap2
+                        executable; default == '%(default)s'""",
+                        default=MINIMAP2_DIR)
 
 def add_call_arguments(parser, bamSuffix, jobName, readType):
     '''
@@ -621,16 +661,9 @@ def main():
     asrevcompparser = subAssemblyParsers.add_parser("revcomp",
                                                     parents=[p],
                                                     add_help=False,
-                                                    help="Reverse complement haplotypes to match a reference genome")
+                                                    help="Phase contigs, then rename and orient them to match a reference genome")
     asrevcompparser.set_defaults(func=assembly_revcomp, scriptSuffix="revcomp")
-    asrevcompparser.add_argument("-r", "--reference", dest="refGenome",
-                                 required=False,
-                                 action=UserSet,
-                                 help="""Optionally, specify the location of the reference genome FASTA file;
-                                 default == '%(default)s'""",
-                                 default=REFERENCE_HAP1_FASTA)
-    add_preset_arguments(asrevcompparser)
-    add_varscripts_argument(asrevcompparser)
+    add_phase_arguments(asrevcompparser)
     add_pbs_arguments(asrevcompparser, jobName="revcomp",
                       walltime="12:00:00", mem="60G", cpus=8)
     
@@ -638,28 +671,15 @@ def main():
     asscaffoldparser = subAssemblyParsers.add_parser("scaffolding",
                                                      parents=[p],
                                                      add_help=False,
-                                                     help="Scaffold haplotypes against a diploid reference genome")
+                                                     help="Phase contigs, then scaffold each haplotype against a reference genome")
     asscaffoldparser.set_defaults(func=assembly_scaffolding, scriptSuffix="scaffolding")
-    asscaffoldparser.add_argument("--refhap1", dest="refHap1",
-                                  required=False,
-                                  action=UserSet,
-                                  help="""Optionally, specify the location of the reference haplotype 1
-                                  FASTA file; default == '%(default)s'""",
-                                  default=REFERENCE_HAP1_FASTA)
-    asscaffoldparser.add_argument("--refhap2", dest="refHap2",
-                                  required=False,
-                                  action=UserSet,
-                                  help="""Optionally, specify the location of the reference haplotype 2
-                                  FASTA file; default == '%(default)s'""",
-                                  default=REFERENCE_HAP2_FASTA)
+    add_phase_arguments(asscaffoldparser)
     asscaffoldparser.add_argument("--paf2dotplot", dest="paf2dotplotDir",
                                   required=False,
                                   action=UserSet,
                                   help="""Optionally, specify the directory containing paf2dotplot.r, used to
                                   make dotplots of the scaffolded haplotypes; default == '%(default)s'""",
                                   default=PAF2DOTPLOT_DIR)
-    add_preset_arguments(asscaffoldparser)
-    add_varscripts_argument(asscaffoldparser)
     add_pbs_arguments(asscaffoldparser, jobName="scaffolding",
                       walltime="12:00:00", mem="70G", cpus=8)
     
@@ -1594,10 +1614,10 @@ def asmain(args):
         print("## hifiasm genome assembly ##")
         validate_as_hifiasm(args)
     if args.assemblyMode == "revcomp":
-        print("## Reverse complement haplotypes to match reference ##")
+        print("## Phase contigs and orient them to match a reference ##")
         validate_as_revcomp(args)
     if args.assemblyMode == "scaffolding":
-        print("## Haplotype scaffolding ##")
+        print("## Phase contigs and scaffold each haplotype ##")
         validate_as_scaffolding(args)
 
 def bcmain(args):

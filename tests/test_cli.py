@@ -116,12 +116,28 @@ def inputs(tmp_path):
     (files["giraffe"] / "reference.fa.fai").write_text("reference#0#chr1\t4\t6\t4\t5\n")
     with gzip.open(files["giraffe"] / "sites.vcf.gz", "wt") as fileOut:
         fileOut.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tP1\ts1\n")
+    files["phased"] = tmp_path / "phased" # an assembly mode's output directory, after a run
+    (files["phased"] / "phase").mkdir(parents=True)
+    (files["phased"] / "phase" / "phasing.tsv").write_text("")
+    (files["phased"] / "partition1.fasta").write_text("")
     files["vgdir"] = tmp_path / "vgdir"
     files["vgdir"].mkdir()
     (files["vgdir"] / "vg").write_text("")
     return { k: str(v) for k, v in files.items() }
 
 VALIDATION_ERRORS = [
+    # assembly modes
+    (["assembly", "revcomp", "-i", "{genome}.missing"], "Contig FASTA file (-i"),
+    (["assembly", "revcomp", "-i", "{genome}", "{genome}"], "given more than once to -i"),
+    (["assembly", "revcomp", "-r", "{genome}.missing"], "Reference genome FASTA file (-r"),
+    (["assembly", "revcomp", "--ploidy", "0"], "--ploidy must be >= 1"),
+    (["assembly", "revcomp", "--phase", "{unpaired}"], "phasing.tsv not found in --phase"),
+    (["assembly", "revcomp", "--phase", "{phased}/phase", "--ploidy", "2"], "--ploidy is only used for phasing"),
+    (["assembly", "revcomp", "--phase", "{phased}/phase", "--preset", "asm5"], "--preset is only used for phasing"),
+    (["assembly", "revcomp", "--outdir", "{phased}"], "already contains a phasing; give it with --phase"),
+    (["assembly", "scaffolding", "--outdir", "{phased}", "--phase", "{phased}/phase"], "partition1.fasta' already exists"),
+    (["assembly", "scaffolding", "--annotarium", "{unpaired}"], "annotarium.py not found in --annotarium"),
+    (["assembly", "scaffolding", "--paf2dotplot", "{unpaired}"], "paf2dotplot.r not found in --paf2dotplot"),
     # call modes
     (["call", "short", "-r", "{nofai}"], "is not indexed; run 'samtools faidx'"),
     (["call", "short", "-r", "{genome}", "-b", "{reads}"], "No BAM files ending with '.sorted.md.bam'"),
@@ -166,6 +182,7 @@ def test_validation_error(args, message, inputs, tmp_path):
     assert written_scripts(str(workDir)) == [] # nothing is written on error
 
 VALIDATION_WARNINGS = [
+    (["assembly", "revcomp", "--phase", "{tmp}/nowhere", "--afterok", "1.pbs"], "the --afterok job(s) must create it"),
     (["call", "short", "-b", "{unindexed}", "--afterok", "1.pbs"], "are not indexed yet"),
     (["call", "short", "-b", "{tmp}/nowhere", "--afterok", "1.pbs"], "the --afterok job(s) must create them"),
     (["call", "giraffe", "-i", "{tmp}/nowhere", "--afterok", "1.pbs"], "giraffe index"),
@@ -206,6 +223,13 @@ def test_call_filter_derives_output(inputs, tmp_path):
     open(vcf[:-7] + ".filtered.vcf.gz", "w").close()
     result = run_psst(["call", "filter", "-i", vcf, "--name", "again", "--script", "again.sh"], tmp_path, check=False)
     assert "already exists" in result.stderr
+
+def test_assembly_phases_by_default(tmp_path):
+    run_psst(["assembly", "scaffolding", "--ploidy", "3"], tmp_path)
+    text = open(tmp_path / "scaffolding.sh").read()
+    assert "CONTIGS=( @@contigFiles@@ )" in text
+    assert "PHASEDIR=''\n" in text # empty phases the contigs
+    assert "PLOIDY=3\n" in text
 
 def test_call_short_hic_sets_orphans(tmp_path):
     run_psst(["call", "short", "--hic"], tmp_path)

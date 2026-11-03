@@ -23,12 +23,16 @@ def q(value):
     '''
     Shell-quote a value for safe inclusion in a job script; values without
     special characters are returned unchanged so the script remains readable.
+    A list is quoted item by item and space-separated, for use in a bash array
+    (e.g., 'FILES=( @@files@@ )').
 
     Parameters:
-        value -- any value that can be converted to a string.
+        value -- any value that can be converted to a string, or a list of them.
     Returns:
         quoted -- a string safe to embed in a bash script.
     '''
+    if isinstance(value, list):
+        return " ".join([ q(v) for v in value ])
     return shlex.quote(str(value))
 
 def load_template(templateName):

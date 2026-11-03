@@ -39,36 +39,48 @@ def assembly_hifiasm(args):
             "hic2": hic2
         })
 
+def phase_values(args):
+    '''
+    Parameters:
+        args -- an argparse.Namespace containing validated arguments of an "assembly" mode
+                which phases contigs with annotarium (see validation.validate_phasing()).
+    Returns:
+        values -- a dict of the template values shared by these modes.
+    '''
+    return {
+        "annotariumDir": args.annotariumDir,
+        "minimap2Dir": args.minimap2Dir,
+        "contigFiles": args.contigFiles,
+        "refGenome": args.refGenome,
+        "phaseDir": args.phaseDir if args.phaseDir != None else "", # empty phases the contigs
+        "ploidy": args.ploidy,
+        "preset": args.preset,
+        "outputDir": args.outputDir,
+        "cpus": args.cpus
+    }
+
 def assembly_revcomp(args):
     '''
-    Generates (and optionally submits) a PBS job script which reverse complements
-    scaffolded haplotypes to match the orientation of a reference genome.
+    Generates (and optionally submits) a PBS job script which phases contigs into haplotype
+    partitions against a reference genome with annotarium (unless given an earlier phasing),
+    then writes each partition's contigs paired 1:1 with the reference contigs, renamed and
+    reverse complemented to match them.
 
     Parameters:
         args -- an argparse.Namespace containing validated "assembly revcomp" arguments.
     '''
-    finalise_job(args, "assembly/run_revcomp.sh", {
-        "varScriptDir": args.varScriptDir,
-        "refGenome": args.refGenome,
-        "cpus": args.cpus,
-        "outputDir": args.outputDir,
-        "preset": args.preset
-    })
+    finalise_job(args, "assembly/run_revcomp.sh", phase_values(args))
 
 def assembly_scaffolding(args):
     '''
-    Generates (and optionally submits) a PBS job script which scaffolds haplotype
-    assemblies against a diploid reference genome.
+    Generates (and optionally submits) a PBS job script which phases contigs into haplotype
+    partitions against a reference genome with annotarium (unless given an earlier phasing),
+    then scaffolds each partition against the reference with RagTag and dotplots it.
 
     Parameters:
         args -- an argparse.Namespace containing validated "assembly scaffolding" arguments.
     '''
-    finalise_job(args, "assembly/run_scaffolding_pipeline.sh", {
-        "varScriptDir": args.varScriptDir,
-        "paf2dotplotDir": args.paf2dotplotDir,
-        "refHap1": args.refHap1,
-        "refHap2": args.refHap2,
-        "cpus": args.cpus,
-        "outputDir": args.outputDir,
-        "preset": args.preset
+    finalise_job(args, "assembly/run_scaffolding.sh", {
+        **phase_values(args),
+        "paf2dotplotDir": args.paf2dotplotDir
     })

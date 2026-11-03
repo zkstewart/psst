@@ -61,6 +61,31 @@ def apply_variants(genome, variants):
         haplotype[c] = "".join(seq)
     return haplotype
 
+def read_fasta(fileName):
+    '''
+    Returns:
+        seqs -- a dict of sequence IDs to sequence strings, in file order.
+    '''
+    seqs = {}
+    for line in open(fileName):
+        if line.startswith(">"):
+            seqID = line[1:].split()[0]
+            seqs[seqID] = []
+        else:
+            seqs[seqID].append(line.strip())
+    return { seqID: "".join(lines) for seqID, lines in seqs.items() }
+
+def diverged_haplotype(rng, genome, snpRate):
+    '''
+    Parameters:
+        genome -- a dict of contig IDs to lists of bases.
+        snpRate -- a float of the probability of a SNP at each base.
+    Returns:
+        haplotype -- a dict of contig IDs to sequence strings.
+    '''
+    return { c: "".join([ other_base(rng, b) if rng.random() < snpRate else b for b in seq ])
+             for c, seq in genome.items() }
+
 def simulate_population(rng, genome, samples):
     '''
     Simulates diploid samples carrying SNPs, multiallelic SNPs, MNPs, deletions and

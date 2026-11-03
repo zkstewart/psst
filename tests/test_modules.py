@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.calling import get_bam_samples, get_vcf_samples
 from modules.mapping import get_array_size
-from modules.pbs import fill_template, format_pbs_header
+from modules.pbs import fill_template, format_pbs_header, q
 from modules.reads import get_read_files
 from modules.validation import parse_mem_gb
 
@@ -86,3 +86,8 @@ def test_format_pbs_header():
     assert "#PBS -J 1-7" in header
     assert "#PBS -W depend=afterok:1.pbs:2.pbs" in header
     assert "#PBS -P ABCDEF1234" in header
+
+def test_q_quotes_lists_item_by_item():
+    assert q("plain") == "plain"
+    assert q(["a.fa", "my file.fa", "it's.fa"]) == """a.fa 'my file.fa' 'it'"'"'s.fa'"""
+    assert q(2) == "2"

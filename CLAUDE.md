@@ -1,6 +1,6 @@
 # psst: notes for working on this repository
 
-psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, and can submit them with `qsub`. It consolidates older scripts from the [Various_scripts](https://github.com/zkstewart/Various_scripts) repository, several of which psst jobs still call (so changes may need to land there first; commit Various_scripts before psst when both change).
+psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, and can submit them with `qsub`. It consolidates older scripts from the [Various_scripts](https://github.com/zkstewart/Various_scripts) repository, several of which psst jobs still call; others have been modernised in [annotarium](https://github.com/zkstewart/annotarium) (e.g., `assembly revcomp`/`scaffolding` run its `assembly phase`, `homology_pair` and `scaffold` modes). Changes may need to land in those repositories first; commit them before psst when both change.
 
 ## Layout
 - `psst.py`: the whole CLI (nested argparse subparsers), shared argument helpers, and per-mode dispatch (`<x>main()` functions calling validators).
@@ -28,7 +28,7 @@ psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, 
 - Walltime is capped at 48h. Mapping modes that need an index warn rather than fail on a missing index when `--afterok` is given, so jobs can be chained.
 
 ## Templates and job scripts
-- Templates are plain bash with `@@field@@` placeholders (not `str.format`, so bash braces are safe). `fill_template` errors if template fields and supplied keys differ; values are `shlex`-quoted, so pass flags as booleans (`"true"`/`"false"`) and assemble argument arrays in bash, not as one string. An empty string disables an optional input.
+- Templates are plain bash with `@@field@@` placeholders (not `str.format`, so bash braces are safe). `fill_template` errors if template fields and supplied keys differ; values are `shlex`-quoted, so pass flags as booleans (`"true"`/`"false"`) and assemble argument arrays in bash, not as one string. A list value is quoted item by item for a bash array (`FILES=( @@files@@ )`). An empty string disables an optional input.
 - Layout: a `####` block of commented variable assignments, a closing `####`, then `# STEP N:` sections. Use `set -eo pipefail` (after any `module load`/`conda activate`).
 - Never overwrite outputs: psst refuses existing scripts/outputs, and jobs check again at runtime. Write outputs under a temporary `.incomplete` name and `mv` on success so partial output never looks complete; per-sample jobs skip samples whose final output exists.
 - Per-sample work is a PBS array job: `get_array_size(numSamples)` gives `#PBS -J 1-N` (no array for one sample, a `@@numSamples@@` placeholder if reads weren't given); templates use `${PBS_ARRAY_INDEX:-1}` and rediscover read files with the same rules as `modules/reads.py` (paired reads end in `1`/`2` before the suffix; the sample name strips a trailing `[._-]R?`).
@@ -38,8 +38,8 @@ psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, 
 
 ## Testing
 Tests live in `tests/` (pytest; `pytest.ini` at the root):
-- `pytest` runs the fast tests (~10 s, no bioinformatics tools needed): every mode found by walking `-h` generates valid bash with only `--rpid`, refuses existing scripts and refuses `--qsub` with placeholders (`test_cli.py`, which also holds tables of validation errors/warnings and `--qsub` chaining with a fake `qsub`); helper functions (`test_modules.py`); and the `call` job scripts' own logic run against a stub `bcftools` (`tests/stubs/bcftools`; `test_call_jobs.py`, `test_call_filter.py`).
-- `pytest -m integration` runs generated job scripts end to end with real tools on data simulated by `tests/sim.py` (~1.5 min); each test skips if its tools aren't on PATH. A suitable environment: `conda create -n psst-test -c conda-forge -c bioconda bwa samtools bcftools htslib minimap2 vg pytest`.
+- `pytest` runs the fast tests (~10 s, no bioinformatics tools needed): every mode found by walking `-h` generates valid bash with only `--rpid`, refuses existing scripts and refuses `--qsub` with placeholders (`test_cli.py`, which also holds tables of validation errors/warnings and `--qsub` chaining with a fake `qsub`); helper functions (`test_modules.py`); and job scripts' own logic run against stub tools in `tests/stubs/` (`bcftools` for `test_call_jobs.py` and `test_call_filter.py`; `annotarium/annotarium.py` for `test_assembly_jobs.py`).
+- `pytest -m integration` runs generated job scripts end to end with real tools on data simulated by `tests/sim.py` (~1.5 min); each test skips if its tools aren't on PATH (annotarium is found at `$PSST_TEST_ANNOTARIUM`, or else beside the psst repository). A suitable environment: `conda create -n psst-test -c conda-forge -c bioconda bwa samtools bcftools htslib minimap2 vg ragtag pytest`, plus annotarium's Python packages.
 
 When adding or changing a mode: add its validation errors to the tables in `test_cli.py`, test any job-script logic with a stub tool where possible, and add an integration test that runs the job on simulated data and checks its output against the simulation's truth. Run both suites before reporting. Jobs run by the tests get `PBS_O_WORKDIR` set by `conftest.run_job()`; when running a job script by hand, export it first, since the header's `cd $PBS_O_WORKDIR` otherwise runs the job in `$HOME`.
 

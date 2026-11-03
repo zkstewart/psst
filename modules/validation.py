@@ -11,7 +11,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import os, re, shutil
+import glob, os, re, shutil
 
 from .basecalling import DORADO_SCRIPTS
 from .calling import BAM_INDEX_SUFFIXES, get_bam_samples, get_vcf_samples
@@ -278,25 +278,64 @@ def validate_as_hifiasm(args):
     if args.lineage == "":
         raise ValueError("--lineage must be given a non-empty value")
 
+def validate_phasing(args):
+    '''
+    Validation for arguments shared by "assembly" modes which phase contigs with annotarium
+    before processing each haplotype partition (i.e., those added by add_phase_arguments()).
+    '''
+    # Validate program locations
+    validate_program_dir(args, "annotariumDir", "annotarium.py", "--annotarium")
+    validate_program_dir(args, "minimap2Dir", "minimap2", "--minimap2")
+    
+    # Validate input files
+    validate_input_file(args, "refGenome", "-r", "Reference genome FASTA file")
+    if args.contigFiles != None:
+        args.contigFiles = [ os.path.abspath(contigFile) for contigFile in args.contigFiles ]
+        for contigFile in args.contigFiles:
+            if not os.path.isfile(contigFile):
+                raise FileNotFoundError(f"Contig FASTA file (-i {contigFile}) does not exist!")
+        if len(set(args.contigFiles)) != len(args.contigFiles):
+            raise ValueError("The same file was given more than once to -i")
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    
+    # Validate the phasing to reuse, or make sure the job won't silently reuse an earlier one
+    if args.phaseDir != None:
+        if "ploidy" in args.userSet:
+            raise ValueError("--ploidy is only used for phasing, so it cannot be given with --phase")
+        args.phaseDir = os.path.abspath(args.phaseDir)
+        if not os.path.isfile(os.path.join(args.phaseDir, "phasing.tsv")):
+            if args.afterok:
+                print(f"WARNING: phasing.tsv is not in --phase {args.phaseDir} yet; the --afterok job(s) must create it")
+            else:
+                raise FileNotFoundError(f"phasing.tsv not found in --phase {args.phaseDir}; was it made by " +
+                                        "annotarium's 'assembly phase'?")
+    else:
+        if args.ploidy < 1:
+            raise ValueError("--ploidy must be >= 1")
+        phaseDir = os.path.join(args.outputDir, "phase")
+        if os.path.exists(os.path.join(phaseDir, "phasing.tsv")):
+            raise FileExistsError(f"'{phaseDir}' already contains a phasing; give it with --phase to reuse it")
+    
+    # Refuse to overwrite the outputs of each partition
+    existing = sorted(glob.glob(os.path.join(args.outputDir, "partition*.fasta")))
+    if existing != []:
+        raise FileExistsError(f"Output file '{existing[0]}' already exists!")
+
 def validate_as_revcomp(args):
     '''
     Validation for arguments used in "assembly revcomp" mode.
     '''
-    validate_program_dir(args, "varScriptDir", os.path.join("assembly", "revcomp_to_match_reference.py"), "--varscripts")
-    validate_input_file(args, "refGenome", "-r", "Reference genome FASTA file")
-    if args.outputDir == "":
-        raise ValueError("--outdir must be given a non-empty value")
+    validate_phasing(args)
+    if args.phaseDir != None and "preset" in args.userSet:
+        raise ValueError("--preset is only used for phasing, so it cannot be given with --phase")
 
 def validate_as_scaffolding(args):
     '''
     Validation for arguments used in "assembly scaffolding" mode.
     '''
-    validate_program_dir(args, "varScriptDir", os.path.join("assembly", "haplotype_scaffolding_pipeline.py"), "--varscripts")
-    validate_input_file(args, "refHap1", "--refhap1", "Reference haplotype 1 FASTA file")
-    validate_input_file(args, "refHap2", "--refhap2", "Reference haplotype 2 FASTA file")
+    validate_phasing(args)
     validate_program_dir(args, "paf2dotplotDir", "paf2dotplot.r", "--paf2dotplot")
-    if args.outputDir == "":
-        raise ValueError("--outdir must be given a non-empty value")
 
 def validate_at(args):
     '''
