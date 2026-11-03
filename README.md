@@ -39,5 +39,8 @@ Jobs are submitted from your current directory, which becomes the job's working 
 * **Existing files are never overwritten.** If a job script already exists at the location psst would write to, psst stops with an error; delete or move the old script first, or use `--script` (or `--workdir` for `basecalling dorado`) to choose a different location.
 * **Script locations.** Job scripts are written to `<outprefix>.<job>.sh` if the job takes an output prefix (`-o`) and you gave one, otherwise to `<job>.sh` in the current directory, unless `--script` is given. Modes which write a chain of jobs name their scripts differently (e.g., `call` modes write `<name>.sh` and `<name>_concat.sh`, set with `--name`).
 
+## Tests
+`pytest` runs the fast tests from the repository root. `pytest -m integration` also runs job scripts end to end on simulated data, which needs bwa, samtools, bcftools, htslib, minimap2 and vg on your `PATH`.
+
 ## For transparency
 This repository will be almost entirely coded using the Claude AI assistant. At the time of writing this README (11th October 2026) I am using Opus 5.5.

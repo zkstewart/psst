@@ -37,7 +37,11 @@ psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, 
 - Prefer streaming pipelines over intermediate files, and give tools memory limits derived from `--mem` where they would otherwise size themselves from the whole node (e.g., salmon `--ramLimit`, STAR `--limitGenomeGenerateRAM`).
 
 ## Testing
-There is no test suite. Verify changes by generating scripts in the scratchpad (placeholders, every validation error path, `--qsub` refusal; a fake `qsub` on PATH tests submission) and, where possible, running the generated job end to end with real tools (a scratch conda env from bioconda works; stub `module` for module-loaded tools) on small simulated data; export `PBS_O_WORKDIR` to the test directory first, since the header's `cd $PBS_O_WORKDIR` otherwise runs jobs in `$HOME`. Afterwards, confirm every existing mode still generates with only `--rpid`.
+Tests live in `tests/` (pytest; `pytest.ini` at the root):
+- `pytest` runs the fast tests (~10 s, no bioinformatics tools needed): every mode found by walking `-h` generates valid bash with only `--rpid`, refuses existing scripts and refuses `--qsub` with placeholders (`test_cli.py`, which also holds tables of validation errors/warnings and `--qsub` chaining with a fake `qsub`); helper functions (`test_modules.py`); and the `call` job scripts' own logic run against a stub `bcftools` (`tests/stubs/bcftools`; `test_call_jobs.py`).
+- `pytest -m integration` runs generated job scripts end to end with real tools on data simulated by `tests/sim.py` (~1.5 min); each test skips if its tools aren't on PATH. A suitable environment: `conda create -n psst-test -c conda-forge -c bioconda bwa samtools bcftools htslib minimap2 vg pytest`.
+
+When adding or changing a mode: add its validation errors to the tables in `test_cli.py`, test any job-script logic with a stub tool where possible, and add an integration test that runs the job on simulated data and checks its output against the simulation's truth. Run both suites before reporting. Jobs run by the tests get `PBS_O_WORKDIR` set by `conftest.run_job()`; when running a job script by hand, export it first, since the header's `cd $PBS_O_WORKDIR` otherwise runs the job in `$HOME`.
 
 ## Repository practices
 - Commit and push only when asked; commit messages describe the change in a short paragraph and end with the attribution line.
