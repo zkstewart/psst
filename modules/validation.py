@@ -14,6 +14,7 @@
 import os, re, shutil
 
 from .basecalling import DORADO_SCRIPTS
+from .calling import BAM_INDEX_SUFFIXES, get_bam_samples
 from .mapping import BWA_INDEX_SUFFIXES
 from .config import CONFIG, RPID_REGEX
 from .reads import get_read_files
@@ -446,6 +447,41 @@ def validate_bs_archive(args):
     if args.readsDir == "":
         raise ValueError("--readsdir must be given a non-empty value")
 
+def validate_h(args):
+    '''
+    Validation for arguments common to all "hic" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_h_contacts(args):
+    '''
+    Validation for arguments used in "hic contacts" mode.
+    '''
+    samples = validate_bwa_inputs(args, False)
+    if samples != None:
+        print(f"Found {len(samples)} read pair(s) to map as one Hi-C library")
+    validate_program_dir(args, "threeddnaDir", os.path.join("visualize", "run-assembly-visualizer.sh"), "--3ddna")
+    
+    # Validate the output prefix, derived from the reference genome if not given
+    if args.prefix == None and args.genome != None:
+        args.prefix = re.sub(r"\.(fasta|fa|fna|fas)$", "", os.path.basename(args.genome), flags=re.IGNORECASE)
+    if args.prefix != None and re.match(r"^[^\s/]+$", args.prefix) == None:
+        raise FormatError(f"-p '{args.prefix}' must not contain whitespace or '/'")
+    
+    # Validate behavioural parameters
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if args.mapq < 0:
+        raise ValueError("--mapq must be >= 0")
+    if re.match(r"^\S+$", args.condaEnv) == None:
+        raise FormatError(f"--conda '{args.condaEnv}' must be non-empty and not contain whitespace")
+    validate_sort_mem(args.sortMem)
+    
+    # 3D-DNA's juicebox_tools.sh requests a fixed 48 GB Java heap
+    args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
+    if parse_mem_gb(args.mem) < 56:
+        print(f"WARNING: --mem {args.mem} is likely too little for 3D-DNA, which runs Java with a 48 GB heap")
+
 def validate_m(args):
     '''
     Validation for arguments common to all "map" mode commands.
@@ -476,7 +512,7 @@ def validate_reads(args, singleEnd):
 
 def validate_bwa_inputs(args, singleEnd):
     '''
-    Validation for the reference genome and reads arguments shared by "map" modes which
+    Validation for the reference genome and reads arguments shared by modes which
     run bwa mem (i.e., those added by add_bwa_arguments() in psst.py).
     
     Parameters:
@@ -506,11 +542,13 @@ def validate_sort_mem(sortMem):
     if re.match(r"^\d+[KMG]$", sortMem) == None:
         raise FormatError(f"--sort-mem '{sortMem}' must be in the format '<number>K/M/G' (e.g., '2G')")
 
-def validate_m_wgs(args):
+def validate_m_short(args):
     '''
-    Validation for arguments used in "map wgs" mode. If a reads directory was given,
+    Validation for arguments used in "map short" mode. If a reads directory was given,
     its samples are counted to determine the array job size.
     '''
+    if args.hic and args.singleEnd:
+        raise ValueError("--hic and --singleEnd are mutually exclusive, since Hi-C reads are paired")
     samples = validate_bwa_inputs(args, args.singleEnd)
     args.numSamples = None
     if samples != None:
@@ -523,35 +561,6 @@ def validate_m_wgs(args):
     if re.match(r"^[^\s@]+$", args.library) == None:
         raise FormatError(f"--library '{args.library}' must be non-empty and not contain whitespace or '@'")
     validate_sort_mem(args.sortMem)
-
-def validate_m_hic(args):
-    '''
-    Validation for arguments used in "map hic" mode.
-    '''
-    samples = validate_bwa_inputs(args, False)
-    if samples != None:
-        print(f"Found {len(samples)} read pair(s) to map as one Hi-C library")
-    validate_program_dir(args, "threeddnaDir", os.path.join("visualize", "run-assembly-visualizer.sh"), "--3ddna")
-    
-    # Validate the output prefix, derived from the reference genome if not given
-    if args.prefix == None and args.genome != None:
-        args.prefix = re.sub(r"\.(fasta|fa|fna|fas)$", "", os.path.basename(args.genome), flags=re.IGNORECASE)
-    if args.prefix != None and re.match(r"^[^\s/]+$", args.prefix) == None:
-        raise FormatError(f"-p '{args.prefix}' must not contain whitespace or '/'")
-    
-    # Validate behavioural parameters
-    if args.outputDir == "":
-        raise ValueError("--outdir must be given a non-empty value")
-    if args.mapq < 0:
-        raise ValueError("--mapq must be >= 0")
-    if re.match(r"^\S+$", args.condaEnv) == None:
-        raise FormatError(f"--conda '{args.condaEnv}' must be non-empty and not contain whitespace")
-    validate_sort_mem(args.sortMem)
-    
-    # 3D-DNA's juicebox_tools.sh requests a fixed 48 GB Java heap
-    args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
-    if parse_mem_gb(args.mem) < 56:
-        print(f"WARNING: --mem {args.mem} is likely too little for 3D-DNA, which runs Java with a 48 GB heap")
 
 def validate_m_index(args):
     '''
@@ -753,6 +762,124 @@ def validate_ratio(value, flag):
     '''
     if not 0 <= value <= 1:
         raise ValueError(f"{flag} must be a ratio in the range 0.0 -> 1.0")
+
+def validate_bams(args):
+    '''
+    Validation for the BAM directory of "call" modes. If given, its BAM files must exist
+    and be indexed, unless the --afterok job(s) will produce them; samples shared by
+    multiple BAM files are reported, since bcftools treats them as one sample.
+
+    Parameters:
+        args -- an argparse.Namespace containing args.bamDir and args.bamSuffix.
+    '''
+    if args.bamSuffix == "":
+        raise ValueError("-bs must be given a non-empty value")
+    if args.bamDir == None:
+        return
+    args.bamDir = os.path.abspath(args.bamDir)
+    bamFiles = []
+    if os.path.isdir(args.bamDir):
+        bamFiles = sorted([ os.path.join(args.bamDir, f) for f in os.listdir(args.bamDir) if f.endswith(args.bamSuffix) ])
+    if bamFiles == []:
+        if args.afterok:
+            print(f"WARNING: no BAM files ending with '{args.bamSuffix}' are in -b {args.bamDir} yet; " +
+                  "the --afterok job(s) must create them")
+            return
+        raise FileNotFoundError(f"No BAM files ending with '{args.bamSuffix}' were found in -b {args.bamDir}")
+
+    # Check that BAMs are indexed, which may be done by a job this one depends on
+    unindexed = [ f for f in bamFiles
+                  if not any(os.path.isfile(f + s) or os.path.isfile(re.sub(r"\.bam$", s, f))
+                             for s in BAM_INDEX_SUFFIXES) ]
+    if unindexed != [] and args.afterok:
+        print(f"WARNING: {len(unindexed)} BAM file(s) are not indexed yet; the --afterok job(s) must index them")
+    elif unindexed != []:
+        raise FileNotFoundError(f"{len(unindexed)} BAM file(s) are not indexed; run 'samtools index' on " +
+                                f"them first (e.g., {unindexed[0]})")
+
+    # Report samples, warning about those which would be merged
+    fileSamples = { f: get_bam_samples(f) for f in bamFiles }
+    sampleFiles = {}
+    for bamFile, samples in fileSamples.items():
+        for sample in (samples or []):
+            sampleFiles.setdefault(sample, []).append(os.path.basename(bamFile))
+    print(f"Found {len(bamFiles)} BAM file(s) with {len(sampleFiles)} sample name(s) in their read groups")
+    for sample, files in sampleFiles.items():
+        if len(files) > 1:
+            print(f"WARNING: sample '{sample}' is named in {len(files)} BAM files ({', '.join(files)}), " +
+                  "which bcftools will call as one sample")
+    noRG = [ os.path.basename(f) for f, samples in fileSamples.items() if samples == [] ]
+    if noRG != []:
+        print(f"WARNING: {len(noRG)} BAM file(s) have no read group samples, so bcftools will name " +
+              f"samples by file name (e.g., {noRG[0]})")
+
+def validate_c(args):
+    '''
+    Validation for arguments common to all "call" mode commands (i.e., those added by
+    add_call_arguments() in psst.py).
+    '''
+    # Validate the reference genome, whose .fai index determines the contigs to call
+    validate_input_file(args, "genome", "-r", "Reference genome FASTA file")
+    numContigs = None
+    if "genome" in args.userSet:
+        if not os.path.isfile(args.genome + ".fai"):
+            raise FileNotFoundError(f"Reference genome (-r {args.genome}) is not indexed; " +
+                                    f"run 'samtools faidx' on it first ({args.genome}.fai not found)")
+        with open(args.genome + ".fai", "r") as fileIn:
+            numContigs = sum(1 for line in fileIn if line.strip() != "")
+    validate_bams(args)
+
+    # Validate the number of chunks, which can't usefully exceed the number of contigs
+    if args.chunks < 1:
+        raise ValueError("--chunks must be >= 1")
+    if numContigs != None and args.chunks > numContigs:
+        print(f"Reducing --chunks from {args.chunks} to the genome's {numContigs} contig(s)")
+        args.chunks = numContigs
+
+    # Validate the output prefix, derived from the reference genome if not given
+    if args.prefix == None and args.genome != None:
+        args.prefix = re.sub(r"\.(fasta|fa|fna|fas)$", "", os.path.basename(args.genome), flags=re.IGNORECASE)
+    if args.prefix != None and re.match(r"^[^\s/]+$", args.prefix) == None:
+        raise FormatError(f"-p '{args.prefix}' must not contain whitespace or '/'")
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if args.prefix != None:
+        outputFile = os.path.join(args.outputDir, f"{args.prefix}.vcf.gz")
+        if os.path.exists(outputFile):
+            raise FileExistsError(f"Output file '{os.path.abspath(outputFile)}' already exists!")
+
+    # Validate behavioural parameters
+    if args.minMapQ < 0:
+        raise ValueError("-q must be >= 0")
+    if getattr(args, "minBaseQ", 0) < 0: # not all modes have this argument
+        raise ValueError("-Q must be >= 0")
+    if args.maxDepth < 1:
+        raise ValueError("--max-depth must be >= 1")
+
+    # Validate job names and resources
+    validate_job_name(args.jobName)
+    for step in ["call", "concat"]:
+        walltime = validate_pbs_resources(getattr(args, f"{step}Cpus"), getattr(args, f"{step}Mem"),
+                                          getattr(args, f"{step}Walltime"), flagPrefix=f"{step}-")
+        setattr(args, f"{step}Walltime", walltime)
+
+    # Validate job script locations
+    args.scriptFiles = {
+        "call": validate_new_script(f"{args.jobName}.sh", "--name"),
+        "concat": validate_new_script(f"{args.jobName}_concat.sh", "--name")
+    }
+
+def validate_c_short(args):
+    '''
+    Validation for arguments used in "call short" mode.
+    '''
+    pass # all arguments are validated by validate_c()
+
+def validate_c_nanopore(args):
+    '''
+    Validation for arguments used in "call nanopore" mode.
+    '''
+    pass # all arguments are validated by validate_c()
 
 def validate_cl(args):
     '''

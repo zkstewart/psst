@@ -32,11 +32,14 @@ from modules.validation import \
         validate_bc_dorado, \
     validate_bs, \
         validate_bs_download, validate_bs_prepare, validate_bs_archive, \
+    validate_c, \
+        validate_c_short, validate_c_nanopore, \
     validate_cl, \
         validate_cl_mmseqs2, validate_cl_cdhit, \
+    validate_h, \
+        validate_h_contacts, \
     validate_m, \
-        validate_m_wgs, validate_m_hic, \
-        validate_m_nanopore, \
+        validate_m_short, validate_m_nanopore, \
         validate_m_index, \
             validate_m_index_bwa, validate_m_index_salmon, validate_m_index_star, \
         validate_m_rna, \
@@ -47,8 +50,10 @@ from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffo
 from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
+from modules.calling import call_variants
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
-from modules.mapping import map_wgs, map_hic, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
+from modules.hic import hic_contacts
+from modules.mapping import map_short, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
     THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
@@ -334,7 +339,7 @@ def add_genscripts_argument(parser):
 
 def add_bwa_arguments(parser, allowSingleEnd):
     '''
-    Adds reference genome and reads arguments to a leaf subparser for "map" modes which
+    Adds reference genome and reads arguments to a leaf subparser for modes which
     run bwa mem.
     
     Parameters:
@@ -393,6 +398,103 @@ def add_preset_arguments(parser):
                         help="""Optionally, specify the minimap2 alignment preset;
                         default == '%(default)s'""",
                         default="asm20")
+
+def add_call_arguments(parser, bamSuffix, jobName, shortReads):
+    '''
+    Adds the arguments of "call" modes, which call variants jointly across BAM files
+    with bcftools as a chunked array job followed by a concatenation job.
+
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+        bamSuffix -- a string of the default BAM file suffix, matching "map" outputs.
+        jobName -- a string of the default PBS job name.
+        shortReads -- a boolean indicating whether to add the short read arguments
+                      (base quality, --hic and --indels-cns); nanopore modes leave
+                      these to the bcftools ont-sup profile.
+    '''
+    parser.add_argument("-r", "--reference", dest="genome",
+                        required=False,
+                        action=UserSet,
+                        help="""Optionally, specify the location of the reference genome FASTA file,
+                        which must be indexed with 'samtools faidx'; default == left as a placeholder""",
+                        default=None)
+    parser.add_argument("-b", "--bamdir", dest="bamDir",
+                        required=False,
+                        help="""Optionally, specify the directory containing indexed BAM files to call
+                        variants from jointly; if given, BAM files are located and checked;
+                        default == left as a placeholder""",
+                        default=None)
+    parser.add_argument("-bs", "--suffix", dest="bamSuffix",
+                        required=False,
+                        help="""Optionally, specify the suffix which identifies BAM files;
+                        default == '%(default)s'""",
+                        default=bamSuffix)
+    parser.add_argument("-p", "--prefix", dest="prefix",
+                        required=False,
+                        help="""Optionally, specify the prefix for output files; default == the
+                        reference genome file name without its extension if -r is given,
+                        otherwise left as a placeholder""",
+                        default=None)
+    parser.add_argument("--outdir", dest="outputDir",
+                        required=False,
+                        help="""Optionally, specify the output directory, relative to the
+                        directory the job is submitted from; default == '%(default)s'""",
+                        default="variants")
+    parser.add_argument("--chunks", dest="chunks",
+                        required=False,
+                        type=int,
+                        help="""Optionally, specify the number of chunks of whole contigs to divide
+                        the genome into, each called by one array subjob (reduced to the number of
+                        contigs if -r is given); default == %(default)s""",
+                        default=50)
+    parser.add_argument("-q", "--min-mapq", dest="minMapQ",
+                        required=False,
+                        type=int,
+                        help="""Optionally, specify the minimum MAPQ of alignments to use;
+                        default == %(default)s""",
+                        default=20)
+    if shortReads:
+        parser.add_argument("-Q", "--min-baseq", dest="minBaseQ",
+                            required=False,
+                            type=int,
+                            help="""Optionally, specify the minimum base quality of bases to use;
+                            default == %(default)s""",
+                            default=20)
+        parser.add_argument("--hic", dest="hic",
+                            required=False,
+                            action="store_true",
+                            help="""Optionally, indicate that reads are Hi-C, which includes read pairs
+                            not flagged as properly paired (as bwa mem -5SP doesn't flag them)""",
+                            default=False)
+        parser.add_argument("--indels-cns", dest="indelsCns",
+                            required=False,
+                            action="store_true",
+                            help="""Optionally, use bcftools' newer (but experimental) --indels-cns
+                            indel calling model""",
+                            default=False)
+    parser.add_argument("--max-depth", dest="maxDepth",
+                        required=False,
+                        type=int,
+                        help="""Optionally, specify the maximum read depth per BAM file at each
+                        position; default == %(default)s""",
+                        default=250)
+    parser.add_argument("--ploidy", dest="ploidy",
+                        required=False,
+                        type=int,
+                        choices=[1, 2],
+                        help="""Optionally, specify the ploidy of samples, which bcftools
+                        supports as 1 or 2; default == %(default)s""",
+                        default=2)
+    parser.add_argument("--name", dest="jobName",
+                        required=False,
+                        help="""Optionally, specify the PBS job name, which also names the job
+                        scripts '<name>.sh' and '<name>_concat.sh'; default == '%(default)s'""",
+                        default=jobName)
+    add_pbs_resource_arguments(parser, step="call", title="PBS resources: variant calling (array job)",
+                               walltime="24:00:00", mem="8G", cpus=1)
+    add_pbs_resource_arguments(parser, step="concat", title="PBS resources: chunk concatenation",
+                               walltime="04:00:00", mem="4G", cpus=2)
+    add_pbs_submission_arguments(parser)
 
 def main():
     usage = """%(prog)s launches PBS jobs with flexible configuration of values.
@@ -766,6 +868,33 @@ def main():
     add_pbs_arguments(brunmparser, jobName="mms2",
                       walltime="46:00:00", mem="750G", cpus=32)
 
+    # Call subparser
+    cparser = subparsers.add_parser("call",
+                                    parents=[p],
+                                    add_help=False,
+                                    help="Variant calling jobs")
+
+    subCallParsers = cparser.add_subparsers(dest="callMode",
+                                            required=True)
+
+    # Call > short mode
+    cshortparser = subCallParsers.add_parser("short",
+                                             parents=[p],
+                                             add_help=False,
+                                             help="""Call variants jointly from short read BAMs (e.g., from
+                                             'map short') with bcftools""")
+    cshortparser.set_defaults(func=call_variants)
+    add_call_arguments(cshortparser, bamSuffix=".sorted.md.bam", jobName="call_short", shortReads=True)
+    
+    # Call > nanopore mode
+    cnanoporeparser = subCallParsers.add_parser("nanopore",
+                                                parents=[p],
+                                                add_help=False,
+                                                help="""Call variants jointly from nanopore BAMs (e.g., from
+                                                'map nanopore') with bcftools' ont-sup profile""")
+    cnanoporeparser.set_defaults(func=call_variants)
+    add_call_arguments(cnanoporeparser, bamSuffix=".sorted.bam", jobName="call_nanopore", shortReads=False)
+
     # Clustering subparser
     clparser = subparsers.add_parser("clustering",
                                      parents=[p],
@@ -868,6 +997,58 @@ def main():
     add_pbs_arguments(clcdhitparser, jobName="cdhit",
                       walltime="48:00:00", mem="30G", cpus=8)
     
+    # Hi-C subparser
+    hparser = subparsers.add_parser("hic",
+                                    parents=[p],
+                                    add_help=False,
+                                    help="Hi-C jobs")
+    
+    subHicParsers = hparser.add_subparsers(dest="hicMode",
+                                           required=True)
+    
+    # Hi-C > contacts mode
+    hcparser = subHicParsers.add_parser("contacts",
+                                        parents=[p],
+                                        add_help=False,
+                                        help="""Map Hi-C reads with bwa mem, then deduplicate contacts with
+                                        pairtools and build a .hic contact map with 3D-DNA""")
+    hcparser.set_defaults(func=hic_contacts, scriptSuffix="hic_contacts")
+    add_bwa_arguments(hcparser, allowSingleEnd=False)
+    hcparser.add_argument("-p", "--prefix", dest="prefix",
+                          required=False,
+                          help="""Optionally, specify the prefix for output files; default == the
+                          reference genome file name without its extension if -r is given,
+                          otherwise left as a placeholder""",
+                          default=None)
+    hcparser.add_argument("--outdir", dest="outputDir",
+                          required=False,
+                          help="""Optionally, specify the output directory, relative to the
+                          directory the job is submitted from; default == '%(default)s'""",
+                          default="hic")
+    hcparser.add_argument("--mapq", dest="mapq",
+                          required=False,
+                          type=int,
+                          help="""Optionally, specify the minimum MAPQ of both reads for a contact
+                          to be included in the .hic file; default == %(default)s""",
+                          default=1)
+    hcparser.add_argument("--sort-mem", dest="sortMem",
+                          required=False,
+                          help="""Optionally, specify the memory for pairtools sort, which should
+                          be well below --mem; default == '%(default)s'""",
+                          default="20G")
+    hcparser.add_argument("--conda", dest="condaEnv",
+                          required=False,
+                          help="""Optionally, specify the conda environment containing pairtools;
+                          default == '%(default)s'""",
+                          default=PAIRTOOLS_CONDA_ENV)
+    hcparser.add_argument("--3ddna", dest="threeddnaDir",
+                          required=False,
+                          action=UserSet,
+                          help="""Optionally, specify the 3D-DNA directory; default == '%(default)s'""",
+                          default=THREEDDNA_DIR)
+    add_pbs_arguments(hcparser, jobName="hic_contacts",
+                      walltime="48:00:00", mem="80G", cpus=16)
+    
     # Map subparser
     mparser = subparsers.add_parser("map",
                                     parents=[p],
@@ -877,74 +1058,37 @@ def main():
     subMapParsers = mparser.add_subparsers(dest="mapMode",
                                            required=True)
     
-    # Map > wgs mode
-    mwgsparser = subMapParsers.add_parser("wgs",
-                                          parents=[p],
-                                          add_help=False,
-                                          help="""Map Illumina DNA reads with bwa mem, then sort and mark
-                                          duplicates (an array job with one subjob per sample)""")
-    mwgsparser.set_defaults(func=map_wgs, scriptSuffix="map_wgs")
-    add_bwa_arguments(mwgsparser, allowSingleEnd=True)
-    mwgsparser.add_argument("--outdir", dest="outputDir",
-                            required=False,
-                            help="""Optionally, specify the output directory, relative to the
-                            directory the job is submitted from; default == '%(default)s'""",
-                            default="mapped")
-    mwgsparser.add_argument("--library", dest="library",
-                            required=False,
-                            help="""Optionally, specify the library name (LB) for read groups;
-                            default == '%(default)s'""",
-                            default="lib1")
-    mwgsparser.add_argument("--sort-mem", dest="sortMem",
-                            required=False,
-                            help="""Optionally, specify the memory per samtools sort thread, which
-                            multiplied by --cpus should be well below --mem; default == '%(default)s'""",
-                            default="3G")
-    add_pbs_arguments(mwgsparser, jobName="map_wgs",
+    # Map > short mode
+    mshortparser = subMapParsers.add_parser("short",
+                                            parents=[p],
+                                            add_help=False,
+                                            help="""Map short DNA reads (e.g., Illumina WGS or Hi-C) with bwa mem,
+                                            then sort and mark duplicates (an array job with one subjob per sample)""")
+    mshortparser.set_defaults(func=map_short, scriptSuffix="map_short")
+    add_bwa_arguments(mshortparser, allowSingleEnd=True)
+    mshortparser.add_argument("--hic", dest="hic",
+                              required=False,
+                              action="store_true",
+                              help="""Optionally, indicate that reads are Hi-C, which maps them with
+                              bwa mem -5SP to handle ligation junctions and distant mates""",
+                              default=False)
+    mshortparser.add_argument("--outdir", dest="outputDir",
+                              required=False,
+                              help="""Optionally, specify the output directory, relative to the
+                              directory the job is submitted from; default == '%(default)s'""",
+                              default="mapped")
+    mshortparser.add_argument("--library", dest="library",
+                              required=False,
+                              help="""Optionally, specify the library name (LB) for read groups;
+                              default == '%(default)s'""",
+                              default="lib1")
+    mshortparser.add_argument("--sort-mem", dest="sortMem",
+                              required=False,
+                              help="""Optionally, specify the memory per samtools sort thread, which
+                              multiplied by --cpus should be well below --mem; default == '%(default)s'""",
+                              default="3G")
+    add_pbs_arguments(mshortparser, jobName="map_short",
                       walltime="24:00:00", mem="55G", cpus=8)
-    
-    # Map > hic mode
-    mhicparser = subMapParsers.add_parser("hic",
-                                          parents=[p],
-                                          add_help=False,
-                                          help="""Map Hi-C reads with bwa mem, then deduplicate contacts with
-                                          pairtools and build a .hic file with 3D-DNA""")
-    mhicparser.set_defaults(func=map_hic, scriptSuffix="map_hic")
-    add_bwa_arguments(mhicparser, allowSingleEnd=False)
-    mhicparser.add_argument("-p", "--prefix", dest="prefix",
-                            required=False,
-                            help="""Optionally, specify the prefix for output files; default == the
-                            reference genome file name without its extension if -r is given,
-                            otherwise left as a placeholder""",
-                            default=None)
-    mhicparser.add_argument("--outdir", dest="outputDir",
-                            required=False,
-                            help="""Optionally, specify the output directory, relative to the
-                            directory the job is submitted from; default == '%(default)s'""",
-                            default="hic")
-    mhicparser.add_argument("--mapq", dest="mapq",
-                            required=False,
-                            type=int,
-                            help="""Optionally, specify the minimum MAPQ of both reads for a contact
-                            to be included in the .hic file; default == %(default)s""",
-                            default=1)
-    mhicparser.add_argument("--sort-mem", dest="sortMem",
-                            required=False,
-                            help="""Optionally, specify the memory for pairtools sort, which should
-                            be well below --mem; default == '%(default)s'""",
-                            default="20G")
-    mhicparser.add_argument("--conda", dest="condaEnv",
-                            required=False,
-                            help="""Optionally, specify the conda environment containing pairtools;
-                            default == '%(default)s'""",
-                            default=PAIRTOOLS_CONDA_ENV)
-    mhicparser.add_argument("--3ddna", dest="threeddnaDir",
-                            required=False,
-                            action=UserSet,
-                            help="""Optionally, specify the 3D-DNA directory; default == '%(default)s'""",
-                            default=THREEDDNA_DIR)
-    add_pbs_arguments(mhicparser, jobName="map_hic",
-                      walltime="48:00:00", mem="80G", cpus=16)
     
     # Map > nanopore mode
     mnanoporeparser = subMapParsers.add_parser("nanopore",
@@ -1249,10 +1393,18 @@ def main():
         validate_b(args)
         bmain(args)
 
+    if args.mode == "call":
+        print("## psst.py - Variant calling handling ##")
+        validate_c(args)
+        cmain(args)
     if args.mode == "clustering":
         print("## psst.py - Clustering handling ##")
         validate_cl(args)
         clmain(args)
+    if args.mode == "hic":
+        print("## psst.py - Hi-C handling ##")
+        validate_h(args)
+        hmain(args)
     if args.mode == "map":
         print("## psst.py - Read mapping handling ##")
         validate_m(args)
@@ -1312,6 +1464,15 @@ def bmain(args):
             print("## MMseqs2 query ##")
             validate_b_run_mmseqs2(args)
 
+def cmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.callMode == "short":
+        print("## bcftools short read variant calling ##")
+        validate_c_short(args)
+    if args.callMode == "nanopore":
+        print("## bcftools nanopore variant calling ##")
+        validate_c_nanopore(args)
+
 def clmain(args):
     # Split into sub-mode-specific validation functions
     if args.clusteringMode == "mmseqs2":
@@ -1321,14 +1482,17 @@ def clmain(args):
         print("## CD-HIT clustering ##")
         validate_cl_cdhit(args)
 
+def hmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.hicMode == "contacts":
+        print("## bwa mem Hi-C read mapping and .hic generation ##")
+        validate_h_contacts(args)
+
 def mmain(args):
     # Split into sub-mode-specific validation functions
-    if args.mapMode == "wgs":
-        print("## bwa mem WGS read mapping ##")
-        validate_m_wgs(args)
-    if args.mapMode == "hic":
-        print("## bwa mem Hi-C read mapping and .hic generation ##")
-        validate_m_hic(args)
+    if args.mapMode == "short":
+        print("## bwa mem short read mapping ##")
+        validate_m_short(args)
     if args.mapMode == "nanopore":
         print("## minimap2 nanopore read mapping ##")
         validate_m_nanopore(args)

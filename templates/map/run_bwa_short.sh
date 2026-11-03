@@ -8,6 +8,7 @@ GENOME=@@genome@@
 READSDIR=@@readsDir@@
 SUFFIX=@@readsSuffix@@
 PAIRED=@@paired@@ # true or false
+HIC=@@hic@@ # true or false; Hi-C reads are mapped with -5SP (paired reads only)
 
 # Specify the output directory
 OUTDIR=@@outputDir@@
@@ -61,10 +62,14 @@ if [[ -f ${OUTBAM} ]]; then
 fi
 mkdir -p "${OUTDIR}"
 
-# STEP 4: Map, sort and mark duplicates without intermediate files
+# STEP 4: Map, sort and mark duplicates without intermediate files; Hi-C reads are mapped
+# with -5SP so that the 5'-most part of a chimeric read is its primary alignment (-5) and
+# distant mates are neither rescued (-S) nor paired by insert size (-P)
+BWAARGS=()
+[[ ${HIC} == "true" ]] && BWAARGS+=( -5SP )
 TMPBAM=${OUTDIR}/${SAMPLE}.incomplete.bam
 RG="@RG\tID:${SAMPLE}\tSM:${SAMPLE}\tPL:ILLUMINA\tLB:${LIBRARY}\tPU:${SAMPLE}"
-bwa mem -t ${CPUS} -R "${RG}" "${GENOME}" "${READS[@]}" \
+bwa mem -t ${CPUS} "${BWAARGS[@]}" -R "${RG}" "${GENOME}" "${READS[@]}" \
     | samtools fixmate -m -u - - \
     | samtools sort -u -@ ${CPUS} -m ${SORTMEM} -T "${OUTDIR}/${SAMPLE}.sort_tmp" - \
     | samtools markdup -@ ${CPUS} -f "${OUTDIR}/${SAMPLE}.markdup.stats" - "${TMPBAM}"

@@ -29,48 +29,27 @@ def get_array_size(numSamples):
         return "@@numSamples@@" # left for the user to fill in
     return numSamples if numSamples > 1 else None
 
-def map_wgs(args):
+def map_short(args):
     '''
     Generates (and optionally submits) a PBS array job script which maps short DNA reads
-    with bwa mem, piping its output through samtools to sort and mark duplicates. Each
-    subjob maps one sample; the array size is a placeholder if no reads directory was
-    given, and no array is requested if there is only one sample.
+    (e.g., Illumina WGS or Hi-C) with bwa mem, piping its output through samtools to sort
+    and mark duplicates. Each subjob maps one sample; the array size is a placeholder if
+    no reads directory was given, and no array is requested if there is only one sample.
 
     Parameters:
-        args -- an argparse.Namespace containing validated "map wgs" arguments.
+        args -- an argparse.Namespace containing validated "map short" arguments.
     '''
-    finalise_job(args, "map/run_bwa_wgs.sh", {
+    finalise_job(args, "map/run_bwa_short.sh", {
         "genome": args.genome,
         "readsDir": args.readsDir,
         "readsSuffix": args.readsSuffix,
         "paired": "false" if args.singleEnd else "true",
+        "hic": "true" if args.hic else "false",
         "outputDir": args.outputDir,
         "library": args.library,
         "cpus": args.cpus,
         "sortMem": args.sortMem
     }, arraySize=get_array_size(args.numSamples))
-
-def map_hic(args):
-    '''
-    Generates (and optionally submits) a PBS job script which maps Hi-C reads with
-    bwa mem -5SP, parses, sorts and deduplicates contacts with pairtools, then builds
-    a .hic file with 3D-DNA for viewing (and editing) in Juicebox.
-
-    Parameters:
-        args -- an argparse.Namespace containing validated "map hic" arguments.
-    '''
-    finalise_job(args, "map/run_bwa_hic.sh", {
-        "condaEnv": args.condaEnv,
-        "threeddnaDir": args.threeddnaDir,
-        "genome": args.genome,
-        "readsDir": args.readsDir,
-        "readsSuffix": args.readsSuffix,
-        "outputDir": args.outputDir,
-        "prefix": args.prefix,
-        "mapq": args.mapq,
-        "cpus": args.cpus,
-        "sortMem": args.sortMem
-    })
 
 def map_index_bwa(args):
     '''

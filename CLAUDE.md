@@ -12,7 +12,7 @@ psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, 
 - `templates/pbs_header.sh` (shared) and `templates/<mode>/*.sh` (one directory per parent mode).
 
 ## Adding a mode
-1. Parser in `psst.py`: `add_parser(..., parents=[p], add_help=False)`, `set_defaults(func=..., scriptSuffix=...)`, then `add_pbs_arguments(parser, jobName, walltime, mem, cpus)` last. New parent modes get a subparser with `dest="<name>Mode"`, a `validate_<abbrev>()` (often `pass`), a dispatch block in `main()` and a `<abbrev>main()` function.
+1. Parser in `psst.py`: `add_parser(..., parents=[p], add_help=False)`, `set_defaults(func=..., scriptSuffix=...)`, then `add_pbs_arguments(parser, jobName, walltime, mem, cpus)` last. New parent modes get a subparser with `dest="<name>Mode"`, a `validate_<abbrev>()` (often `pass`), a dispatch block in `main()` and a `<abbrev>main()` function; a parent mode without submodes is itself the leaf parser, and its dispatch block calls `validate_<abbrev>()` directly.
 2. Validator in `modules/validation.py`, imported and called from the dispatch function.
 3. Job function in `modules/<mode>.py` passing a dict of every template field to `finalise_job(args, "<mode>/<template>.sh", values[, arraySize=...])`.
 4. Template in `templates/<mode>/`.
@@ -32,10 +32,11 @@ psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, 
 - Layout: a `####` block of commented variable assignments, a closing `####`, then `# STEP N:` sections. Use `set -eo pipefail` (after any `module load`/`conda activate`).
 - Never overwrite outputs: psst refuses existing scripts/outputs, and jobs check again at runtime. Write outputs under a temporary `.incomplete` name and `mv` on success so partial output never looks complete; per-sample jobs skip samples whose final output exists.
 - Per-sample work is a PBS array job: `get_array_size(numSamples)` gives `#PBS -J 1-N` (no array for one sample, a `@@numSamples@@` placeholder if reads weren't given); templates use `${PBS_ARRAY_INDEX:-1}` and rediscover read files with the same rules as `modules/reads.py` (paired reads end in `1`/`2` before the suffix; the sample name strips a trailing `[._-]R?`).
+- Multi-job modes (`basecalling dorado`, `call *`) use `add_pbs_resource_arguments(step=...)` per job plus `add_pbs_submission_arguments()`, render every script before writing any, and with `--qsub` chain later jobs via `submit_job(..., afterok=...)`. Genome-wide work is split into chunks of whole contigs (`call`: a `.fai`-based awk partition in genome order, with `.empty` markers for chunks without contigs).
 - Prefer streaming pipelines over intermediate files, and give tools memory limits derived from `--mem` where they would otherwise size themselves from the whole node (e.g., salmon `--ramLimit`, STAR `--limitGenomeGenerateRAM`).
 
 ## Testing
-There is no test suite. Verify changes by generating scripts in the scratchpad (placeholders, every validation error path, `--qsub` refusal; a fake `qsub` on PATH tests submission) and, where possible, running the generated job end to end with real tools (a scratch conda env from bioconda works; stub `module` for module-loaded tools) on small simulated data. Afterwards, confirm every existing mode still generates with only `--rpid`.
+There is no test suite. Verify changes by generating scripts in the scratchpad (placeholders, every validation error path, `--qsub` refusal; a fake `qsub` on PATH tests submission) and, where possible, running the generated job end to end with real tools (a scratch conda env from bioconda works; stub `module` for module-loaded tools) on small simulated data; export `PBS_O_WORKDIR` to the test directory first, since the header's `cd $PBS_O_WORKDIR` otherwise runs jobs in `$HOME`. Afterwards, confirm every existing mode still generates with only `--rpid`.
 
 ## Repository practices
 - Commit and push only when asked; commit messages describe the change in a short paragraph and end with the attribution line.
