@@ -1044,8 +1044,9 @@ def main():
     cfilterparser.add_argument("--maf", dest="maf",
                                required=False,
                                type=float,
-                               help="""Optionally, specify the minimum minor allele frequency (e.g., 0.05);
-                               default == no filter""",
+                               help="""Optionally, specify the minimum minor allele frequency (e.g., 0.05); for a
+                               multiallelic record, this is the frequency of its second most common
+                               allele, so rarer alleles may remain (see --biallelic); default == no filter""",
                                default=None)
     cfilterparser.add_argument("--biallelic", dest="biallelic",
                                required=False,

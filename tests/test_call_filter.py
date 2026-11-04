@@ -76,7 +76,9 @@ def test_filter_refuses_existing_output(vcf, tmp_path, stub_bcftools):
 @pytest.mark.integration
 @pytest.mark.parametrize("args,kept", [
     ([], [1, 2, 8, 9, 9, 10, 11]),
-    (["--maf", "0.25"], [2, 9, 10, 11]), # the rarest allele of site 8 has frequency 2/9
+    (["--maf", "0.25"], [2, 8, 9, 10, 11]), # site 8's MAF is that of its second most common allele (3/9),
+                                            # not its rarest (2/9); split site 9 keeps only its 3/9 record
+    (["--maf", "0.35"], [2]),
     (["--biallelic"], [1, 2, 10, 11]),
     (["--no-indels"], [1, 2, 8, 9, 9]),
     (["--biallelic", "--no-indels", "--maf", "0.15"], [2]),
