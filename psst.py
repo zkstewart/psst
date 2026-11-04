@@ -22,7 +22,7 @@ import os, argparse, sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__))) # realpath allows running via a symlink
 from modules.validation import \
     validate_as, \
-        validate_as_hifiasm, validate_as_revcomp, validate_as_scaffolding, \
+        validate_as_hifiasm, validate_as_revcomp, validate_as_scaffolding, validate_as_braker3, \
     validate_at, \
         validate_at_generate, \
     validate_b, \
@@ -48,7 +48,7 @@ from modules.validation import \
         validate_pg_create, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
-from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding
+from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding, assembly_braker3
 from modules.basecalling import basecalling_dorado
 from modules.basespace import basespace_download, basespace_prepare, basespace_archive
 from modules.blast import blast_run_mmseqs2
@@ -58,8 +58,8 @@ from modules.hic import hic_contacts
 from modules.pangenome import pangenome_create
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, \
-    REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
+    REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, BRAKER_PROTEINS_FASTA, \
     REFERENCE_FASTA
 from _version import __version__
 
@@ -685,6 +685,69 @@ def main():
                                   default=PAF2DOTPLOT_DIR)
     add_pbs_arguments(asscaffoldparser, jobName="scaffolding",
                       walltime="12:00:00", mem="70G", cpus=8)
+    
+    # Assembly > braker3 mode
+    asbrakerparser = subAssemblyParsers.add_parser("braker3",
+                                                   parents=[p],
+                                                   add_help=False,
+                                                   help="Predict genes in a softmasked genome with BRAKER3, using RNAseq and protein evidence")
+    asbrakerparser.set_defaults(func=assembly_braker3, scriptSuffix="braker3")
+    asbrakerparser.add_argument("-g", "--genome", dest="genome",
+                                required=False,
+                                action=UserSet,
+                                help="""Optionally, specify the location of the softmasked genome FASTA file;
+                                default == left as a placeholder""",
+                                default=None)
+    asbrakerparser.add_argument("--proteins", dest="proteins",
+                                required=False,
+                                action=UserSet,
+                                help="""Optionally, specify the location of the protein evidence FASTA file;
+                                default == '%(default)s'""",
+                                default=BRAKER_PROTEINS_FASTA)
+    asbrakerparser.add_argument("--sra", dest="sraFiles",
+                                required=False,
+                                nargs="+",
+                                metavar="FILE",
+                                help="""Optionally, specify one or more text files listing SRA accessions
+                                (one per line) of RNAseq datasets for BRAKER3 to download; their
+                                accessions are combined; default == none if -d is given, otherwise
+                                left as a placeholder""",
+                                default=None)
+    asbrakerparser.add_argument("-d", "--readsdir", dest="readsDir",
+                                required=False,
+                                help="""Optionally, specify the directory containing paired RNAseq read
+                                files; default == none if --sra is given, otherwise left as a placeholder""",
+                                default=None)
+    asbrakerparser.add_argument("-rs", "--suffix", dest="readsSuffix",
+                                required=False,
+                                help="""Optionally, specify the suffix which identifies read files, where the
+                                character before it is 1 or 2 (e.g., 'sample_1.fq.gz' and 'sample_2.fq.gz');
+                                default == '%(default)s'""",
+                                default=".fq.gz")
+    asbrakerparser.add_argument("-p", "--prefix", dest="prefix",
+                                required=False,
+                                help="""Optionally, specify the species name to train AUGUSTUS as, which
+                                also prefixes output files; default == the -g file name without its
+                                FASTA (and .masked) extension""",
+                                default=None)
+    asbrakerparser.add_argument("--lineage", dest="lineage",
+                                required=False,
+                                help="""Optionally, specify the BUSCO lineage BRAKER3 uses to assess
+                                and improve its predictions; default == '%(default)s'""",
+                                default="eudicots")
+    asbrakerparser.add_argument("--outdir", dest="outputDir",
+                                required=False,
+                                help="""Optionally, specify the output directory, relative to the
+                                directory the job is submitted from; default == '%(default)s'""",
+                                default="braker3")
+    asbrakerparser.add_argument("--sif", dest="brakerSif",
+                                required=False,
+                                action=UserSet,
+                                help="""Optionally, specify the location of the BRAKER3 Singularity
+                                image; default == '%(default)s'""",
+                                default=BRAKER3_SIF)
+    add_pbs_arguments(asbrakerparser, jobName="braker3",
+                      walltime="40:00:00", mem="80G", cpus=24)
     
     # Basecalling subparser
     bcparser = subparsers.add_parser("basecalling",
@@ -1708,6 +1771,9 @@ def asmain(args):
     if args.assemblyMode == "scaffolding":
         print("## Phase contigs and scaffold each haplotype ##")
         validate_as_scaffolding(args)
+    if args.assemblyMode == "braker3":
+        print("## BRAKER3 gene annotation ##")
+        validate_as_braker3(args)
 
 def bcmain(args):
     # Split into sub-mode-specific validation functions

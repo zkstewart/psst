@@ -5,6 +5,7 @@ import gzip, os, sys
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from modules.assembly import braker_prefix, check_rnaseq_ids, read_sra_accessions
 from modules.calling import get_bam_samples, get_vcf_samples
 from modules.mapping import get_array_size
 from modules.pangenome import group_haplotypes, name_genomes, parse_seqfile, seqfile_name
@@ -147,3 +148,36 @@ def test_parse_seqfile(tmp_path):
     (tmp_path / "bad.txt").write_text("a b c\n")
     with pytest.raises(ValueError, match="must have 2 columns"):
         parse_seqfile(str(tmp_path / "bad.txt"))
+
+@pytest.mark.parametrize("fileName, expected", [
+    ("/x/Fingerlime_genome.fna.masked", "Fingerlime_genome"),
+    ("genome.softmasked.fasta", "genome"),
+    ("a.b.fa.gz", "a.b"),
+    ("plain", "plain"),
+])
+def test_braker_prefix(fileName, expected):
+    assert braker_prefix(fileName) == expected
+
+def test_read_sra_accessions(tmp_path):
+    (tmp_path / "ok.txt").write_text("SRR1\n\n  ERR22 \r\nDRR3\n")
+    assert read_sra_accessions(str(tmp_path / "ok.txt")) == ["SRR1", "ERR22", "DRR3"]
+    (tmp_path / "empty.txt").write_text("\n")
+    with pytest.raises(ValueError, match="lists no SRA accessions"):
+        read_sra_accessions(str(tmp_path / "empty.txt"))
+    (tmp_path / "bad.txt").write_text("SRR1\nSRX5\n")
+    with pytest.raises(ValueError, match="Line 2 .* \\('SRX5'\\) is not an SRA run accession"):
+        read_sra_accessions(str(tmp_path / "bad.txt"))
+
+@pytest.mark.parametrize("ids, message", [
+    (["SRR1", "SRR11", "leaf"], None),
+    (["leaf", "SRR1", "leaf"], "'leaf' is given more than once"),
+    (["A1", "BA1"], "'A1' matches the end of 'BA1'"),
+    (["SRR11", "SRR1"], None), # neither ends the other
+    (["x.1", "xy1"], "'x.1' matches the end of 'xy1'"), # IDs are regexes to BRAKER3
+])
+def test_check_rnaseq_ids(ids, message):
+    if message == None:
+        check_rnaseq_ids(ids)
+    else:
+        with pytest.raises(ValueError, match=message):
+            check_rnaseq_ids(ids)

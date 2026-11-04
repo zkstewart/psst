@@ -1,0 +1,5 @@
+#!/bin/bash
+# A stand-in for curl which prints a few lines of BUSCO's file_versions.tsv, whatever is asked
+printf 'eudicots_odb10\t2024-01-08\t38ece5baf0523143fc6594030bca4487\tEukaryota\tlineages\n'
+printf 'list_of_reference_markers.eukaryota_odb12.2.txt\t2026-05-13\ta580c16c2762efd94e54f6ab383575d4\tEukaryota\tplacement_files\n'
+printf 'eukaryota_odb10\t2024-01-08\t93e2a6ec05708dbf0f23db078b88c5a8\tEukaryota\tlineages\n'

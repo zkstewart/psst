@@ -16,13 +16,15 @@
         "star_module": "STAR/2.7.11b",
         "minimap2_dir": "/home/stewarz2/various_programs/minimap2",
         "chopper_dir": "/home/stewarz2/anaconda3/bin",
-        "vg_dir": "/home/stewarz2/anaconda3/envs/cactus/bin"
+        "vg_dir": "/home/stewarz2/anaconda3/envs/cactus/bin",
+        "braker3_sif": "/home/stewarz2/various_programs/BRAKER-3/braker3.sif"
     },
     "databases": {
         "refseq_plant_fasta": "/home/stewarz2/various_programs/refseq_db/refseq_plant.protein.faa",
         "uniref90_fasta": "/home/stewarz2/various_programs/uniref_db/uniref90.fasta",
         "uniref_idmapping_file": "/home/stewarz2/various_programs/uniref_db/idmapping_selected.tab",
-        "go_obo_file": "/home/stewarz2/various_programs/uniref_db/go.obo"
+        "go_obo_file": "/home/stewarz2/various_programs/uniref_db/go.obo",
+        "braker_proteins_fasta": "/work/ePGL/databases/proteins/odb_12/plus_citrus/citrus_viridiplantae_proteins.fasta"
     },
     "references": {
         "reference_fasta": "/work/ePGL/genomes/citrus/bundaberg/Busk/Busk.hap1.fasta"

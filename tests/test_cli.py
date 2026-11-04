@@ -116,6 +116,8 @@ def inputs(tmp_path):
     (files["giraffe"] / "reference.fa.fai").write_text("reference#0#chr1\t4\t6\t4\t5\n")
     with gzip.open(files["giraffe"] / "sites.vcf.gz", "wt") as fileOut:
         fileOut.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tP1\ts1\n")
+    files["braker"] = tmp_path / "braker_run" # an "assembly braker3" output directory, after a run
+    (files["braker"] / "augustus_config").mkdir(parents=True)
     files["phased"] = tmp_path / "phased" # an assembly mode's output directory, after a run
     (files["phased"] / "phase").mkdir(parents=True)
     (files["phased"] / "phase" / "phasing.tsv").write_text("")
@@ -127,6 +129,10 @@ def inputs(tmp_path):
     files["seqfile"] = tmp_path / "seqfile.txt"
     files["seqfile"].write_text(f"A.1\t{files['genomes']}/A.hap1.fa\nref\t{files['genomes']}/ref.fa\n" +
                                 f"B.0\t{files['genomes']}/B.fa\n")
+    files["sra"] = tmp_path / "sra.txt"
+    files["sra"].write_text("SRR1\nSRR22\n")
+    files["badsra"] = tmp_path / "badsra.txt"
+    files["badsra"].write_text("SRR1\nsample\n")
     files["vgdir"] = tmp_path / "vgdir"
     files["vgdir"].mkdir()
     (files["vgdir"] / "vg").write_text("")
@@ -145,6 +151,18 @@ VALIDATION_ERRORS = [
     (["assembly", "scaffolding", "--outdir", "{phased}", "--phase", "{phased}/phase"], "partition1.fasta' already exists"),
     (["assembly", "scaffolding", "--annotarium", "{unpaired}"], "annotarium.py not found in --annotarium"),
     (["assembly", "scaffolding", "--paf2dotplot", "{unpaired}"], "paf2dotplot.r not found in --paf2dotplot"),
+    (["assembly", "braker3", "-g", "{genome}.missing"], "Genome FASTA file (-g"),
+    (["assembly", "braker3", "--proteins", "{genome}.missing"], "Protein evidence FASTA file (--proteins"),
+    (["assembly", "braker3", "--sif", "{genome}.missing"], "BRAKER3 Singularity image (--sif"),
+    (["assembly", "braker3", "--sra", "{sra}.missing"], "SRA accessions file (--sra"),
+    (["assembly", "braker3", "--sra", "{sra}", "{sra}"], "given more than once to --sra"),
+    (["assembly", "braker3", "--sra", "{badsra}"], "Line 2 of --sra file"),
+    (["assembly", "braker3", "--sra", "{genome}"], "is not an SRA run accession"),
+    (["assembly", "braker3", "-d", "{unpaired}"], "has no matching reverse read file"),
+    (["assembly", "braker3", "-d", "{reads}", "-rs", ".bam"], "must end with .fq, .fastq, .fq.gz or .fastq.gz"),
+    (["assembly", "braker3", "-p", "a/b"], "-p 'a/b' may only contain"),
+    (["assembly", "braker3", "--lineage", ""], "--lineage must be given a non-empty value"),
+    (["assembly", "braker3", "--outdir", "{braker}"], "already exists from a previous BRAKER3 run"),
     # call modes
     (["call", "short", "-r", "{nofai}"], "is not indexed; run 'samtools faidx'"),
     (["call", "short", "-r", "{genome}", "-b", "{reads}"], "No BAM files ending with '.sorted.md.bam'"),
@@ -267,6 +285,15 @@ def test_pangenome_names_genomes(inputs, tmp_path):
     run_psst(["pangenome", "create", "--seqfile", inputs["seqfile"], "--refname", "ref", "--script", "s.sh"], tmp_path)
     text = open(tmp_path / "s.sh").read()
     assert "NAMES=( A.1 ref B.0 )\n" in text and "REFERENCE=ref\n" in text
+
+def test_braker3_rnaseq_inputs(inputs, tmp_path):
+    run_psst(["assembly", "braker3", "-g", inputs["genome"], "--sra", inputs["sra"]], tmp_path)
+    text = open(tmp_path / "braker3.sh").read()
+    assert f"SRAFILES=( {inputs['sra']} )\n" in text and "READSDIR=''\n" in text # empty disables local reads
+    assert f"PREFIX={os.path.basename(inputs['genome']).split('.')[0]}\n" in text
+    run_psst(["assembly", "braker3", "-d", inputs["reads"], "-p", "sp", "--script", "s.sh"], tmp_path)
+    text = open(tmp_path / "s.sh").read()
+    assert "SRAFILES=(  )\n" in text and f"READSDIR={inputs['reads']}\n" in text and "PREFIX=sp\n" in text
 
 def test_call_short_hic_sets_orphans(tmp_path):
     run_psst(["call", "short", "--hic"], tmp_path)

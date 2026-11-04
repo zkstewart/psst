@@ -13,6 +13,7 @@
 
 import glob, os, re, shutil
 
+from .assembly import BRAKER_READS_SUFFIX_REGEX, RNASEQ_ID_REGEX, braker_prefix, check_rnaseq_ids, read_sra_accessions
 from .basecalling import DORADO_SCRIPTS
 from .calling import BAM_INDEX_SUFFIXES, get_bam_samples, get_vcf_samples
 from .mapping import BWA_INDEX_SUFFIXES, GIRAFFE_MAP_FILES, GIRAFFE_CALL_FILES
@@ -429,6 +430,58 @@ def validate_as_scaffolding(args):
     '''
     validate_phasing(args)
     validate_program_dir(args, "paf2dotplotDir", "paf2dotplot.r", "--paf2dotplot")
+
+def validate_as_braker3(args):
+    '''
+    Validation for arguments used in "assembly braker3" mode.
+    '''
+    # Validate input files
+    validate_input_file(args, "brakerSif", "--sif", "BRAKER3 Singularity image")
+    validate_input_file(args, "genome", "-g", "Genome FASTA file")
+    validate_input_file(args, "proteins", "--proteins", "Protein evidence FASTA file")
+    
+    # Validate RNAseq inputs; if neither kind is given, both are left as placeholders
+    rnaseqIDs = []
+    if BRAKER_READS_SUFFIX_REGEX.search(args.readsSuffix) == None:
+        raise ValueError(f"-rs '{args.readsSuffix}' must end with .fq, .fastq, .fq.gz or .fastq.gz, " +
+                         "as BRAKER3 requires")
+    samples = validate_reads(args, singleEnd=False)
+    if samples != None:
+        for sampleName, _, _ in samples:
+            if RNASEQ_ID_REGEX.match(sampleName) == None:
+                raise ValueError(f"Sample name '{sampleName}' of read files in {args.readsDir} may only " +
+                                 "contain letters, numbers, '.', '_' and '-'")
+            rnaseqIDs.append(sampleName)
+    if args.sraFiles != None:
+        args.sraFiles = [ os.path.abspath(sraFile) for sraFile in args.sraFiles ]
+        for sraFile in args.sraFiles:
+            if not os.path.isfile(sraFile):
+                raise FileNotFoundError(f"SRA accessions file (--sra {sraFile}) does not exist!")
+        if len(set(args.sraFiles)) != len(args.sraFiles):
+            raise ValueError("The same file was given more than once to --sra")
+        accessions = [ a for sraFile in args.sraFiles for a in read_sra_accessions(sraFile) ]
+        rnaseqIDs += list(dict.fromkeys(accessions)) # the job combines them without repeats
+    check_rnaseq_ids(rnaseqIDs)
+    if args.sraFiles == None and args.readsDir != None:
+        args.sraFiles = []
+    elif args.readsDir == None and args.sraFiles != None:
+        args.readsDir = "" # empty disables local reads
+    
+    # Validate parameters
+    if args.prefix == None and args.genome != None:
+        args.prefix = braker_prefix(args.genome)
+    if args.prefix != None and RNASEQ_ID_REGEX.match(args.prefix) == None:
+        raise ValueError(f"-p '{args.prefix}' may only contain letters, numbers, '.', '_' and '-'")
+    if args.lineage == "":
+        raise ValueError("--lineage must be given a non-empty value")
+    
+    # Refuse to overwrite a previous run, which BRAKER3 cannot resume
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    for name in ["braker", "augustus_config"]:
+        if os.path.exists(os.path.join(args.outputDir, name)):
+            raise FileExistsError(f"'{os.path.join(args.outputDir, name)}' already exists from a previous " +
+                                  "BRAKER3 run; give a different --outdir")
 
 def validate_at(args):
     '''

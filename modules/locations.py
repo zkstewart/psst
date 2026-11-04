@@ -38,12 +38,14 @@ STAR_MODULE = CONFIG["programs"]["star_module"]
 MINIMAP2_DIR = CONFIG["programs"]["minimap2_dir"]
 CHOPPER_DIR = CONFIG["programs"]["chopper_dir"]
 VG_DIR = CONFIG["programs"]["vg_dir"]
+BRAKER3_SIF = CONFIG["programs"]["braker3_sif"]
 
 # Database locations on the HPC
 REFSEQ_PLANT_FASTA = CONFIG["databases"]["refseq_plant_fasta"]
 UNIREF90_FASTA = CONFIG["databases"]["uniref90_fasta"]
 IDMAPPING_FILE = CONFIG["databases"]["uniref_idmapping_file"]
 OBO_FILE = CONFIG["databases"]["go_obo_file"]
+BRAKER_PROTEINS_FASTA = CONFIG["databases"]["braker_proteins_fasta"]
 
 # Reference genome locations on the HPC
 REFERENCE_FASTA = CONFIG["references"]["reference_fasta"]

@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+# A stand-in for 'singularity exec' of the BRAKER3 image, which lets the "assembly braker3"
+# job script be tested without it. Every invocation is logged to $STUB_DIR/singularity.log
+# as one line of arguments joined by '|'. Paths used inside the container must lie within a
+# --bind directory (following links, as the container would). It handles two commands:
+# - 'cp -R /opt/Augustus/config DEST' creates DEST/species;
+# - 'braker.pl ...' finds each --rnaseq_sets_ids set's files as braker.pl does (matching the
+#   ID to the end of file names in --rnaseq_sets_dirs), writing one line per set to
+#   $STUB_DIR/rnaseq.tsv ('ID<TAB>file1,file2', or 'ID<TAB>SRA' for a set to download).
+#   It requires the job's mb_downloads/file_versions.tsv,
+#   without placement files, then fails if $STUB_FAIL is set, or else writes <workingdir>/braker.{gtf,gff3,aa,codingseq}
+#   and the trained species' directory.
+
+import os, re, sys
+
+args = sys.argv[1:]
+stubDir = os.environ["STUB_DIR"]
+with open(os.path.join(stubDir, "singularity.log"), "a") as fileOut:
+    fileOut.write("|".join(args) + "\n")
+assert args[0] == "exec" and args[1] == "--bind"
+binds = [ os.path.realpath(b) for b in args[2].split(",") ]
+command = args[4:]
+
+def visible(path):
+    path = os.path.realpath(path)
+    if not any(path == b or path.startswith(b + os.sep) for b in binds):
+        print(f"{path} is not bound into the container")
+        sys.exit(1)
+    return path
+
+if command[:3] == ["cp", "-R", "/opt/Augustus/config"]:
+    os.makedirs(os.path.join(visible(os.path.dirname(command[3])), os.path.basename(command[3]), "species"))
+    sys.exit(0)
+
+assert command[0] == "braker.pl"
+opts = dict( a[2:].split("=", 1) for a in command[1:] if "=" in a )
+for key in ["genome", "prot_seq", "workingdir", "AUGUSTUS_CONFIG_PATH"]:
+    visible(opts[key] if key != "workingdir" else os.path.dirname(opts[key]))
+
+# Find each RNAseq set's local files with braker.pl's regexes (see its check_rnaseq_sets)
+extensions = "fastq|fq|fasta|fa|fastq.gz|fq.gz|fasta.gz|fa.gz"
+files = []
+for setsDir in opts.get("rnaseq_sets_dirs", "").split(","):
+    if setsDir != "":
+        files += [ os.path.join(visible(setsDir), f) for f in sorted(os.listdir(setsDir)) ]
+with open(os.path.join(stubDir, "rnaseq.tsv"), "w") as fileOut:
+    for rnaSet in opts["rnaseq_sets_ids"].split(","):
+        r1 = [ f for f in files if re.search(f"{rnaSet}_1.({extensions})$", f) ]
+        r2 = [ f for f in files if re.search(f"{rnaSet}_2.({extensions})$", f) ]
+        if r1 and r2:
+            for f in [r1[0], r2[0]]:
+                visible(f) # the link's target
+            fileOut.write(f"{rnaSet}\t{os.path.basename(r1[0])},{os.path.basename(r2[0])}\n")
+        else:
+            fileOut.write(f"{rnaSet}\tSRA\n")
+
+# The job must work around compleasm failing to download placement files
+downloads = os.path.join(opts["workingdir"], "mb_downloads")
+assert os.path.exists(os.path.join(downloads, "file_versions.tsv.done"))
+assert "placement_files" not in open(os.path.join(downloads, "file_versions.tsv")).read()
+assert "lineages" in open(os.path.join(downloads, "file_versions.tsv")).read()
+if os.environ.get("STUB_FAIL"):
+    sys.exit(1)
+os.makedirs(os.path.join(opts["AUGUSTUS_CONFIG_PATH"], "species", opts["species"]))
+for ext in ["gtf", "gff3", "aa", "codingseq"]:
+    open(os.path.join(opts["workingdir"], f"braker.{ext}"), "w").write(f"{ext}\n")
