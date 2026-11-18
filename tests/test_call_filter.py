@@ -1,7 +1,7 @@
 # Tests of "call filter": the bcftools commands its job builds from each option (using a
 # stub bcftools), and the sites real bcftools keeps from a VCF of known sites.
 
-import os, subprocess
+import os, re, subprocess
 
 import pytest
 
@@ -73,11 +73,21 @@ def test_filter_refuses_existing_output(vcf, tmp_path, stub_bcftools):
     assert result.returncode != 0
     assert "already exists" in result.stdout
 
+def bcftools_version():
+    '''
+    Returns:
+        version -- a tuple of ints of the bcftools version on PATH (e.g., (1, 23, 1)).
+    '''
+    result = subprocess.run(["bcftools", "--version"], check=True, capture_output=True, text=True)
+    return tuple(int(x) for x in re.match(r"bcftools (\d+(?:\.\d+)*)", result.stdout).group(1).split("."))
+
 @pytest.mark.integration
 @pytest.mark.parametrize("args,kept", [
     ([], [1, 2, 8, 9, 9, 10, 11]),
-    (["--maf", "0.25"], [2, 8, 9, 10, 11]), # site 8's MAF is that of its second most common allele (3/9),
-                                            # not its rarest (2/9); split site 9 keeps only its 3/9 record
+    # A multiallelic record's MAF and MAC are those of its rarest allele from bcftools 1.24 (site 8:
+    # 2/9, 2), and of its second most common before then (3/9, 3); split site 9 keeps only its 3/9 record
+    (["--maf", "0.25"], { "1.24": [2, 9, 10, 11], "older": [2, 8, 9, 10, 11] }),
+    (["--mac", "3"], { "1.24": [2, 9, 10, 11], "older": [2, 8, 9, 10, 11] }),
     (["--maf", "0.35"], [2]),
     (["--biallelic"], [1, 2, 10, 11]),
     (["--no-indels"], [1, 2, 8, 9, 9]),
@@ -89,6 +99,8 @@ def test_filter_refuses_existing_output(vcf, tmp_path, stub_bcftools):
 ], ids=lambda x: " ".join(x) if isinstance(x, list) and x and isinstance(x[0], str) else None)
 def test_filter_sites(args, kept, vcf, tmp_path):
     require_tools("bcftools")
+    if isinstance(kept, dict): # expectations which differ by bcftools version
+        kept = kept["1.24" if bcftools_version() >= (1, 24) else "older"]
     output = run_filter(vcf, tmp_path, args)
     positions = subprocess.run(["bcftools", "query", "-f", "%POS\\n", output], check=True,
                                capture_output=True, text=True).stdout.split()

@@ -1038,15 +1038,18 @@ def main():
                                required=False,
                                type=int,
                                help="""Optionally, specify the minimum minor allele count, which removes
-                               sites where every sample has the same allele; 0 disables this filter;
-                               default == %(default)s""",
+                               sites where every sample has the same allele; for a multiallelic record,
+                               bcftools 1.24 and later count its rarest allele (earlier versions, its
+                               second most common); 0 disables this filter; default == %(default)s""",
                                default=1)
     cfilterparser.add_argument("--maf", dest="maf",
                                required=False,
                                type=float,
                                help="""Optionally, specify the minimum minor allele frequency (e.g., 0.05); for a
-                               multiallelic record, this is the frequency of its second most common
-                               allele, so rarer alleles may remain (see --biallelic); default == no filter""",
+                               multiallelic record, bcftools 1.24 and later use its rarest allele, removing
+                               the record if any allele is rarer (earlier versions use its second most
+                               common allele, so rarer alleles may remain; see --biallelic);
+                               default == no filter""",
                                default=None)
     cfilterparser.add_argument("--biallelic", dest="biallelic",
                                required=False,
