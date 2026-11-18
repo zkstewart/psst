@@ -39,7 +39,7 @@ def assembly_hifiasm(args):
         args -- an argparse.Namespace containing validated "assembly hifiasm" arguments.
     '''
     values = {
-        "genScriptDir": args.genScriptDir,
+        "annotariumDir": args.annotariumDir,
         "compleasmDir": args.compleasmDir,
         "cpus": args.cpus,
         "lineage": args.lineage

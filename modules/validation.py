@@ -356,7 +356,7 @@ def validate_as_hifiasm(args):
     Validation for arguments used in "assembly hifiasm" mode.
     '''
     # Validate program locations
-    validate_program_dir(args, "genScriptDir", "genome_stats.py", "--genscripts")
+    validate_program_dir(args, "annotariumDir", "annotarium.py", "--annotarium")
     validate_program_dir(args, "compleasmDir", "compleasm.py", "--compleasm")
     
     # Validate Hi-C arguments
@@ -550,9 +550,9 @@ def validate_bc_dorado(args):
     # Validate program locations
     validate_program_dir(args, "doradoDir", os.path.join("bin", "dorado"), "--dorado")
     for requiredFile in [os.path.join("basecalling", "dorado_correct_pipeline.py"),
-                         "fasta_handling_master_code.py", "fasta_concat.py"]:
+                         "fasta_handling_master_code.py"]:
         validate_program_dir(args, "varScriptDir", requiredFile, "--varscripts")
-    validate_program_dir(args, "genScriptDir", "genome_stats.py", "--genscripts")
+    validate_program_dir(args, "annotariumDir", "annotarium.py", "--annotarium")
     
     # Validate behavioural parameters
     if args.prefix != None and re.match(r"^[^\s/]+$", args.prefix) == None:

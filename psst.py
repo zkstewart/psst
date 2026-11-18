@@ -61,7 +61,7 @@ from modules.hic import hic_contacts
 from modules.pangenome import pangenome_create
 from modules.qc import qc_library_trim, qc_library_fastqc, qc_library_kraken2
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
-from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
+from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
     THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, READQC_CONDA_ENV, FASTQC_MODULE, KRAKEN2_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, BRAKER_PROTEINS_FASTA, KRAKEN2_DB, \
     REFERENCE_FASTA
@@ -343,21 +343,6 @@ def add_annotarium_argument(parser):
                         help="""Optionally, specify the location of the annotarium repository;
                         default == '%(default)s'""",
                         default=ANNOTARIUM_DIR)
-
-def add_genscripts_argument(parser):
-    '''
-    Adds the Genome_analysis_scripts location argument to a leaf subparser for any job
-    that runs scripts from the Genome_analysis_scripts repository.
-    
-    Parameters:
-        parser -- an argparse.ArgumentParser to add arguments to.
-    '''
-    parser.add_argument("--genscripts", dest="genScriptDir",
-                        required=False,
-                        action=UserSet,
-                        help="""Optionally, specify the location of the Genome_analysis_scripts
-                        repository; default == '%(default)s'""",
-                        default=GENSCRIPT_DIR)
 
 def add_bwa_arguments(parser, allowSingleEnd):
     '''
@@ -670,7 +655,7 @@ def main():
                                  help="""Optionally, specify the directory containing compleasm.py;
                                  default == '%(default)s'""",
                                  default=COMPLEASM_DIR)
-    add_genscripts_argument(ashifiasmparser)
+    add_annotarium_argument(ashifiasmparser)
     add_pbs_arguments(ashifiasmparser, jobName="asm",
                       walltime="24:00:00", mem="90G", cpus=14)
     
@@ -829,7 +814,7 @@ def main():
                                 default == '%(default)s'""",
                                 default=DORADO_DIR)
     add_varscripts_argument(bcdoradoparser)
-    add_genscripts_argument(bcdoradoparser)
+    add_annotarium_argument(bcdoradoparser)
     add_pbs_resource_arguments(bcdoradoparser, step="p1", title="PBS resources: basecaller part 1 (GPU basecalling)",
                                walltime="32:00:00", mem="35G", cpus=1)
     add_pbs_resource_arguments(bcdoradoparser, step="p2", title="PBS resources: basecaller part 2 (BAM to FASTQ)",

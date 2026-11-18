@@ -63,8 +63,7 @@ def basecalling_dorado(args):
             "s2Cpus": args.s2Cpus, "s2Mem": args.s2Mem, "s2Walltime": args.s2Walltime
         }, {}),
         ("concat", {
-            "varScriptDir": args.varScriptDir,
-            "genScriptDir": args.genScriptDir,
+            "annotariumDir": args.annotariumDir,
             "prefix": args.prefix,
             "concatMinimum": args.concatMinimum,
             "concatMultiline": args.concatMultiline

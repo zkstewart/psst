@@ -3,7 +3,6 @@
         "mmseqs_dir": "/home/stewarz2/various_programs/mmseqs/bin",
         "various_scripts_dir": "/home/stewarz2/scripts/Various_scripts",
         "annotarium_dir": "/home/stewarz2/scripts/annotarium",
-        "genome_analysis_scripts_dir": "/home/stewarz2/scripts/Genome_analysis_scripts",
         "compleasm_dir": "/home/stewarz2/various_programs/compleasm_kit",
         "dorado_dir": "/home/stewarz2/various_programs/dorado/dorado-1.3.0-linux-x64",
         "basespace_dir": "/home/stewarz2/various_programs/basespace",
