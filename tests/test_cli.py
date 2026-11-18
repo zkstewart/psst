@@ -230,7 +230,7 @@ VALIDATION_ERRORS = [
     (["qc", "library", "fastqc", "-d", "{unpaired}"], "has no matching reverse read file"),
     (["qc", "library", "fastqc", "-o", "summary.csv"], "must end with '.xlsx'"),
     (["qc", "library", "fastqc", "--outdir", ""], "--outdir must be given a non-empty value"),
-    (["qc", "library", "fastqc", "--varscripts", "{unpaired}"], "tabulate_fastqc.py not found in --varscripts"),
+    (["qc", "library", "fastqc", "--annotarium", "{unpaired}"], "annotarium.py not found in --annotarium"),
     (["qc", "library", "fastqc", "--module", "a b"], "--module 'a b' must be non-empty"),
     (["qc", "library", "fastqc", "--fastqc-mem", "8X"], "is not a valid PBS memory value"),
     (["qc", "library", "fastqc", "--tabulate-walltime", "49"], "exceeds the HPC limit of 48 hours"),

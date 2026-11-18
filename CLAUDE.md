@@ -1,6 +1,6 @@
 # psst: notes for working on this repository
 
-psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, and can submit them with `qsub`. It consolidates older scripts from the [Various_scripts](https://github.com/zkstewart/Various_scripts) repository, several of which psst jobs still call; others have been modernised in [annotarium](https://github.com/zkstewart/annotarium) (e.g., `assembly revcomp`/`scaffolding` run its `assembly phase`, `homology_pair` and `scaffold` modes). Changes may need to land in those repositories first; commit them before psst when both change.
+psst (`psst.py`) generates PBS job scripts for the QUT HPC from bash templates, and can submit them with `qsub`. It consolidates older scripts from the [Various_scripts](https://github.com/zkstewart/Various_scripts) repository, several of which psst jobs still call; others have been modernised in [annotarium](https://github.com/zkstewart/annotarium) (e.g., `assembly revcomp`/`scaffolding` run its `assembly phase`, `homology_pair` and `scaffold` modes, and `qc library fastqc` its `qc fastqc tabulate`). Changes may need to land in those repositories first; commit them before psst when both change.
 
 ## Layout
 - `psst.py`: the whole CLI (nested argparse subparsers), shared argument helpers, and per-mode dispatch (`<x>main()` functions calling validators).

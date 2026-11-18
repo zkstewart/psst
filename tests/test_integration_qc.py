@@ -1,10 +1,11 @@
 # Integration tests of "qc library" modes on simulated reads, checking their outputs against
 # the simulation's truth: "trim" runs bbduk on reads which read through into adapters or end
-# in low-quality bases (requiring bbduk.sh on PATH), "fastqc" runs FastQC then Various_scripts'
-# tabulate_fastqc.py (requiring fastqc on PATH, pandas, xlsxwriter and openpyxl), and "kraken2" classifies
-# reads from known taxa against a small database built here, then combines and reformats the
-# reports (requiring kraken2, KrakenTools and Krona on PATH, and pandas). Various_scripts is
-# found at $PSST_TEST_VARSCRIPTS, or else beside the psst repository.
+# in low-quality bases (requiring bbduk.sh on PATH), "fastqc" runs FastQC then annotarium's
+# 'qc fastqc tabulate' (requiring fastqc on PATH, and pandas, xlsxwriter and openpyxl), and
+# "kraken2" classifies reads from known taxa against a small database built here, then combines
+# and reformats the reports (requiring kraken2, KrakenTools and Krona on PATH, and pandas).
+# annotarium is found at $PSST_TEST_ANNOTARIUM, and Various_scripts at $PSST_TEST_VARSCRIPTS,
+# or else beside the psst repository.
 
 import gzip, os, random, shutil, subprocess
 
@@ -17,6 +18,8 @@ pytestmark = pytest.mark.integration
 
 SAMPLES = ["S1", "S2"]
 MINLEN = 25
+ANNOTARIUM = os.environ.get("PSST_TEST_ANNOTARIUM",
+                            os.path.join(os.path.dirname(os.path.dirname(TESTS_DIR)), "annotarium"))
 VARSCRIPTS = os.environ.get("PSST_TEST_VARSCRIPTS",
                             os.path.join(os.path.dirname(os.path.dirname(TESTS_DIR)), "Various_scripts"))
 
@@ -92,8 +95,8 @@ def fastqc_reports(tmp_path_factory):
     pytest.importorskip("pandas")
     pytest.importorskip("xlsxwriter")
     pytest.importorskip("openpyxl") # for pandas to read the table
-    if not os.path.isfile(os.path.join(VARSCRIPTS, "QC", "reads", "tabulate_fastqc.py")):
-        pytest.skip(f"requires Various_scripts at {VARSCRIPTS} (or set $PSST_TEST_VARSCRIPTS)")
+    if not os.path.isfile(os.path.join(ANNOTARIUM, "annotarium.py")):
+        pytest.skip(f"requires annotarium at {ANNOTARIUM} (or set $PSST_TEST_ANNOTARIUM)")
     base = tmp_path_factory.mktemp("fastqc")
     rng = random.Random(5)
     genome = { c: "".join(s) for c, s in sim.random_genome(rng, { "chr1": 40000 }).items() }
@@ -110,7 +113,7 @@ def fastqc_reports(tmp_path_factory):
     env = dict(os.environ)
     env["PATH"] = f"{binDir}{os.pathsep}{env['PATH']}"
     for readsDir, extraArgs in [("reads", []), ("single", ["--singleEnd", "--outdir", "fastqc_se", "--name", "se"])]:
-        run_psst(["qc", "library", "fastqc", "-d", str(base / readsDir), "--varscripts", VARSCRIPTS,
+        run_psst(["qc", "library", "fastqc", "-d", str(base / readsDir), "--annotarium", ANNOTARIUM,
                   "--fastqc-cpus", "2", *extraArgs], base)
         name = "se" if extraArgs else "fastqc"
         run_array_job(str(base / f"{name}.sh"), str(base), env=env)
@@ -121,8 +124,9 @@ def test_fastqc(fastqc_reports):
     import pandas as pd
     base, numPairs = fastqc_reports
     tables = pd.read_excel(base / "fastqc" / "fastqc_summary.xlsx", sheet_name=None, index_col=0)
-    assert list(tables) == ["Forward Reads", "Reverse Reads"]
-    for table in tables.values():
+    assert list(tables) == ["Combined Reads", "Forward Reads", "Reverse Reads"]
+    for sheet in ["Forward Reads", "Reverse Reads"]:
+        table = tables[sheet]
         assert sorted(table.index) == ["adapters", "clean"]
         for sample, n in numPairs.items():
             assert table.loc[sample, "total_reads"] == n
@@ -130,6 +134,10 @@ def test_fastqc(fastqc_reports):
         # A third of the adapters sample's pairs read through into adapters
         assert table.loc["adapters", "adapter_content"] == "FAIL"
         assert table.loc["clean", "adapter_content"] == "PASS"
+    combined = tables["Combined Reads"] # each pair's reads summed, and their flags compared
+    for sample, n in numPairs.items():
+        assert combined.loc[sample, "total_reads"] == n * 2
+        assert combined.loc[sample, "adapter_content"] == "SAME"
     single = pd.read_excel(base / "fastqc_se" / "fastqc_summary.xlsx", sheet_name=None, index_col=0)
     assert list(single) == ["Forward Reads"] # single-end reads have no reverse reads
     assert single["Forward Reads"].loc["adapters", "total_reads"] == numPairs["adapters"]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# A stand-in for annotarium which lets the "assembly" job scripts be tested without real
-# data. Every invocation is logged to $STUB_DIR/annotarium.log as one line of arguments
+# A stand-in for annotarium which lets the "assembly" and "qc library fastqc" job scripts
+# be tested without real data. Every invocation is logged to $STUB_DIR/annotarium.log as one line of arguments
 # joined by '|' (so that arguments containing spaces can be told apart), then:
 #   assembly phase -- writes phasing.tsv, assigning contig 'c<N>' to each partition N up
 #                     to --ploidy, and coverage.tsv to its -o directory
@@ -8,6 +8,7 @@
 #                             $STUB_FAIL_PARTITION
 #   assembly scaffold -- writes partition<N>.fasta to its -o directory for each partition
 #                        in its -i phasing.tsv
+#   qc fastqc tabulate -- writes its -o file, then fails if $STUB_FAIL is set
 
 import os, sys
 
@@ -43,3 +44,8 @@ elif mode == "scaffold":
     for partition in assigned_partitions(value("-i")):
         with open(os.path.join(value("-o"), f"partition{partition}.fasta"), "w") as fileOut:
             fileOut.write(f">partition{partition}\n")
+elif mode == "fastqc": # qc fastqc tabulate
+    with open(value("-o"), "w") as fileOut:
+        fileOut.write("table\n")
+    if os.environ.get("STUB_FAIL"):
+        sys.exit(1)

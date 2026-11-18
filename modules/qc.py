@@ -43,7 +43,7 @@ def qc_library_fastqc(args):
         <name>.sh -- an array job running FastQC on each sample's reads, writing reports
                      to <outdir>/<sample>/
         <name>_tabulate.sh -- summarises every sample's reports in an Excel table with
-                              Various_scripts' tabulate_fastqc.py
+                              annotarium's 'qc fastqc tabulate'
 
     With --qsub, the tabulation job is submitted to run after every FastQC subjob succeeds.
 
@@ -64,7 +64,7 @@ def qc_library_fastqc(args):
         }, get_array_size(args.numSamples)),
         ("tabulate", "qc/run_tabulate_fastqc.sh", {
             **reads,
-            "varScriptDir": args.varScriptDir,
+            "annotariumDir": args.annotariumDir,
             "outputFile": args.outputFile
         }, None)
     ])

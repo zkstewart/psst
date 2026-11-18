@@ -1301,7 +1301,7 @@ def validate_qc_library_fastqc(args):
     if samples != None:
         args.numSamples = len(samples)
         print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to check")
-    validate_program_dir(args, "varScriptDir", os.path.join("QC", "reads", "tabulate_fastqc.py"), "--varscripts")
+    validate_program_dir(args, "annotariumDir", "annotarium.py", "--annotarium")
     if re.match(r"^\S+$", args.fastqcModule) == None:
         raise FormatError(f"--module '{args.fastqcModule}' must be non-empty and not contain whitespace")
     

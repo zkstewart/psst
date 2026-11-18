@@ -329,6 +329,21 @@ def add_varscripts_argument(parser):
                         repository; default == '%(default)s'""",
                         default=VARSCRIPT_DIR)
 
+def add_annotarium_argument(parser):
+    '''
+    Adds the annotarium location argument to a leaf subparser for any job that runs
+    annotarium.
+    
+    Parameters:
+        parser -- an argparse.ArgumentParser to add arguments to.
+    '''
+    parser.add_argument("--annotarium", dest="annotariumDir",
+                        required=False,
+                        action=UserSet,
+                        help="""Optionally, specify the location of the annotarium repository;
+                        default == '%(default)s'""",
+                        default=ANNOTARIUM_DIR)
+
 def add_genscripts_argument(parser):
     '''
     Adds the Genome_analysis_scripts location argument to a leaf subparser for any job
@@ -433,12 +448,7 @@ def add_phase_arguments(parser):
                         help="""Optionally, specify the output directory, relative to the
                         directory the job is submitted from; default == '%(default)s'""",
                         default="output")
-    parser.add_argument("--annotarium", dest="annotariumDir",
-                        required=False,
-                        action=UserSet,
-                        help="""Optionally, specify the location of the annotarium repository;
-                        default == '%(default)s'""",
-                        default=ANNOTARIUM_DIR)
+    add_annotarium_argument(parser)
     parser.add_argument("--minimap2", dest="minimap2Dir",
                         required=False,
                         action=UserSet,
@@ -1768,7 +1778,8 @@ def main():
                                                     parents=[p],
                                                     add_help=False,
                                                     help="""Check reads with FastQC (an array job with one subjob per
-                                                    sample), then summarise every sample's reports in an Excel table""")
+                                                    sample), then summarise every sample's reports in an Excel table
+                                                    with annotarium""")
     qcfastqcparser.set_defaults(func=qc_library_fastqc)
     add_reads_arguments(qcfastqcparser, allowSingleEnd=True)
     qcfastqcparser.add_argument("--outdir", dest="outputDir",
@@ -1787,7 +1798,7 @@ def main():
                                 help="""Optionally, specify the FastQC module to load;
                                 default == '%(default)s'""",
                                 default=FASTQC_MODULE)
-    add_varscripts_argument(qcfastqcparser)
+    add_annotarium_argument(qcfastqcparser)
     qcfastqcparser.add_argument("--name", dest="jobName",
                                 required=False,
                                 help="""Optionally, specify the PBS job name, which also names the job

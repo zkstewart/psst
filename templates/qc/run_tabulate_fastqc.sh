@@ -1,7 +1,7 @@
 ####
 
-# Specify the Various_scripts location
-VARSCRIPTDIR=@@varScriptDir@@
+# Specify the annotarium location
+ANNOTARIUMDIR=@@annotariumDir@@
 
 # Specify the reads directory and the suffix identifying read files, as given to FastQC
 READSDIR=@@readsDir@@
@@ -24,8 +24,7 @@ if [[ -f ${TABLE} ]]; then
     exit 1
 fi
 
-# STEP 2: Check that every sample has FastQC reports, since tabulate_fastqc.py summarises
-# every subdirectory of the reports directory as a sample
+# STEP 2: Locate every sample's FastQC reports
 if [[ ${PAIRED} == "true" ]]; then
     READFILES=( "${READSDIR}"/*1"${SUFFIX}" )
 else
@@ -35,6 +34,7 @@ if (( ${#READFILES[@]} == 0 )); then
     echo "No read files ending with ${SUFFIX} were found in ${READSDIR}"
     exit 1
 fi
+SAMPLEDIRS=()
 for R1 in "${READFILES[@]}"; do
     BASE=$(basename "${R1}")
     if [[ ${PAIRED} == "true" ]]; then
@@ -46,15 +46,12 @@ for R1 in "${READFILES[@]}"; do
         echo "${OUTDIR}/${SAMPLE} was not found; has FastQC finished for every sample?"
         exit 1
     fi
+    SAMPLEDIRS+=( "${OUTDIR}/${SAMPLE}" )
 done
-INCOMPLETE=( "${OUTDIR}"/*.incomplete/ )
-if (( ${#INCOMPLETE[@]} > 0 )); then
-    echo "${OUTDIR} contains incomplete FastQC output (${INCOMPLETE[*]}); remove it to tabulate"
-    exit 1
-fi
 
-# STEP 3: Tabulate the reports, giving the table its final name once complete
+# STEP 3: Tabulate the reports (a sheet comparing each pair's reads, if paired, then a sheet
+# per read direction), giving the table its final name once complete
 TMPTABLE=${TABLE%.xlsx}.incomplete.xlsx
 rm -f "${TMPTABLE}" # left by a failed run
-python "${VARSCRIPTDIR}/QC/reads/tabulate_fastqc.py" -i "${OUTDIR}" -o "${TMPTABLE}"
+python "${ANNOTARIUMDIR}/annotarium.py" qc fastqc tabulate -i "${SAMPLEDIRS[@]}" -o "${TMPTABLE}"
 mv "${TMPTABLE}" "${TABLE}"
