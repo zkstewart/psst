@@ -208,3 +208,52 @@ def finalise_job(args, templateName, values, arraySize=None):
     check_placeholders(args, missing)
     if args.qsub:
         submit_job(args.scriptFile)
+
+def finalise_chained_jobs(args, jobs):
+    '''
+    Fills the templates of a multi-job mode's jobs, writes every job script and, if
+    requested, submits each job to run after the previous one succeeds. Every script is
+    rendered before any is written, so submission is refused up front if placeholders
+    remain in any of them (including in headers, e.g., an array size).
+    
+    Each job's PBS resources are read from args.<step>Cpus, args.<step>Mem and
+    args.<step>Walltime (as added by add_pbs_resource_arguments(step=...) in psst.py),
+    and its script location from args.scriptFiles[step]. The first job is named
+    args.jobName, and later jobs '<args.jobName>_<step>'.
+    
+    Parameters:
+        args -- an argparse.Namespace containing validated PBS arguments, args.qsub,
+                args.afterok, args.afternotok, args.jobName and args.scriptFiles.
+        jobs -- a list of tuples like (step, templateName, values, arraySize), in the
+                order they should run; arraySize is passed to format_pbs_header().
+    '''
+    scripts = []
+    missing = []
+    for i, (step, templateName, values, arraySize) in enumerate(jobs):
+        body, stepMissing = fill_template(templateName, values)
+        dependencies = { "afterok": args.afterok, "afternotok": args.afternotok } if i == 0 else {}
+        header = format_pbs_header(args.jobName if i == 0 else f"{args.jobName}_{step}",
+                                   getattr(args, f"{step}Walltime"),
+                                   getattr(args, f"{step}Mem"),
+                                   getattr(args, f"{step}Cpus"),
+                                   args.rpid, arraySize=arraySize, **dependencies)
+        scripts.append(args.scriptFiles[step])
+        stepMissing = PLACEHOLDER_REGEX.findall(header) + stepMissing
+        missing += [ m for m in stepMissing if m not in missing ]
+        jobs[i] = (header, body)
+    if args.qsub and missing != []:
+        check_placeholders(args, missing) # raises an error before anything is written
+    
+    for scriptFile, (header, body) in zip(scripts, jobs):
+        write_job_script(scriptFile, header, body)
+    check_placeholders(args, missing)
+    
+    # Submit each job to follow the previous one
+    if args.qsub:
+        jobID = None
+        for scriptFile in scripts:
+            jobID = submit_job(scriptFile, afterok=jobID)
+    else:
+        for previous, scriptFile in zip(scripts, scripts[1:]):
+            print(f"Submit '{scriptFile}' to run after '{os.path.basename(previous)}' succeeds, " +
+                  "i.e., with 'qsub -W depend=afterok:<its job ID>'")

@@ -1,0 +1,9 @@
+#!/bin/bash
+# A stand-in for ktImportText, which records its arguments (separated by '|') in
+# $STUB_DIR/ktImportText.log and writes its -o file
+set -e
+( IFS="|"; echo "$*" ) >> "${STUB_DIR}/ktImportText.log"
+while (( $# > 0 )); do
+    [[ $1 == "-o" ]] && echo "stub" > "$2"
+    shift
+done

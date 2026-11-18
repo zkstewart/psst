@@ -25,6 +25,11 @@ from .reads import get_read_files
 # UserSet argparse action) are checked to exist; default locations are used unchecked.
 
 MAX_WALLTIME_HOURS = 48
+
+# Rough minutes for "qc library kraken2" to read its database into memory, then to classify
+# each sample, used to warn when --classify-walltime looks too short
+KRAKEN2_LOAD_MINUTES = 10
+KRAKEN2_SAMPLE_MINUTES = 3
 RPID_SHORTCUTS = CONFIG["rpid_shortcuts"]
 
 class DirectoryNotFoundError(Exception):
@@ -1320,5 +1325,55 @@ def validate_qc_library_fastqc(args):
     # Validate job script locations
     args.scriptFiles = {
         "fastqc": validate_new_script(f"{args.jobName}.sh", "--name"),
+        "tabulate": validate_new_script(f"{args.jobName}_tabulate.sh", "--name")
+    }
+
+def validate_qc_library_kraken2(args):
+    '''
+    Validation for arguments used in "qc library kraken2" mode. If a reads directory was
+    given, its samples are counted to check the walltime allows for classifying them all.
+    '''
+    samples = validate_reads(args, args.singleEnd)
+    if samples != None:
+        print(f"Found {len(samples)} {'single-end' if args.singleEnd else 'paired'} sample(s) to classify")
+    validate_program_dir(args, "db", "hash.k2d", "--db")
+    validate_program_dir(args, "varScriptDir", os.path.join("kraken", "kreport_reformat.py"), "--varscripts")
+    if re.match(r"^\S+$", args.condaEnv) == None:
+        raise FormatError(f"--conda '{args.condaEnv}' must be non-empty and not contain whitespace")
+    
+    # Validate the output directory and the prefix of the combined tables written there
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if re.match(r"^[^\s/]+$", args.prefix) == None:
+        raise FormatError(f"-p '{args.prefix}' must be non-empty and not contain whitespace or '/'")
+    for suffix in [".tsv", ".reformat.tsv"]:
+        outputFile = os.path.join(args.outputDir, args.prefix + suffix)
+        if os.path.exists(outputFile):
+            raise FileExistsError(f"Output table '{os.path.abspath(outputFile)}' already exists!")
+    
+    # Validate job names and resources; kraken2 loads its database into memory
+    validate_job_name(args.jobName)
+    for step in ["classify", "tabulate"]:
+        walltime = validate_pbs_resources(getattr(args, f"{step}Cpus"), getattr(args, f"{step}Mem"),
+                                          getattr(args, f"{step}Walltime"), flagPrefix=f"{step}-")
+        setattr(args, f"{step}Walltime", walltime)
+    if "db" in args.userSet:
+        dbGB = os.path.getsize(os.path.join(args.db, "hash.k2d")) / 1024**3
+        if parse_mem_gb(args.classifyMem) < dbGB:
+            print(f"WARNING: --classify-mem {args.classifyMem} is less than the size of the kraken2 " +
+                  f"database ({dbGB:.1f} GB), which the job keeps in memory for every sample")
+    
+    # Samples are classified serially, so check the walltime allows for all of them
+    if samples != None:
+        hours, minutes, seconds = parse_walltime(args.classifyWalltime)
+        estimate = KRAKEN2_LOAD_MINUTES + KRAKEN2_SAMPLE_MINUTES * len(samples)
+        if hours * 60 + minutes + seconds / 60 < estimate:
+            print(f"WARNING: --classify-walltime {args.classifyWalltime} may be too short to classify " +
+                  f"{len(samples)} sample(s) one after another (estimated {estimate // 60}h{estimate % 60:02d}m " +
+                  f"at {KRAKEN2_LOAD_MINUTES} min to read the database and {KRAKEN2_SAMPLE_MINUTES} min per sample)")
+    
+    # Validate job script locations
+    args.scriptFiles = {
+        "classify": validate_new_script(f"{args.jobName}.sh", "--name"),
         "tabulate": validate_new_script(f"{args.jobName}_tabulate.sh", "--name")
     }

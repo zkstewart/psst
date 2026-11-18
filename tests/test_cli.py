@@ -137,6 +137,9 @@ def inputs(tmp_path):
     files["vgdir"] = tmp_path / "vgdir"
     files["vgdir"].mkdir()
     (files["vgdir"] / "vg").write_text("")
+    files["k2db"] = tmp_path / "k2db"
+    files["k2db"].mkdir()
+    (files["k2db"] / "hash.k2d").write_bytes(b"\0" * 2 * 1024**2) # larger than --classify-mem 1M
     return { k: str(v) for k, v in files.items() }
 
 VALIDATION_ERRORS = [
@@ -232,6 +235,14 @@ VALIDATION_ERRORS = [
     (["qc", "library", "fastqc", "--fastqc-mem", "8X"], "is not a valid PBS memory value"),
     (["qc", "library", "fastqc", "--tabulate-walltime", "49"], "exceeds the HPC limit of 48 hours"),
     (["qc", "library", "fastqc", "--name", "a b"], "must start with a letter"),
+    (["qc", "library", "kraken2", "-d", "{unpaired}"], "has no matching reverse read file"),
+    (["qc", "library", "kraken2", "--db", "{unpaired}"], "hash.k2d not found in --db"),
+    (["qc", "library", "kraken2", "--varscripts", "{unpaired}"], "kreport_reformat.py not found in --varscripts"),
+    (["qc", "library", "kraken2", "--conda", ""], "--conda '' must be non-empty"),
+    (["qc", "library", "kraken2", "-p", "a/b"], "-p 'a/b' must be non-empty"),
+    (["qc", "library", "kraken2", "--outdir", ""], "--outdir must be given a non-empty value"),
+    (["qc", "library", "kraken2", "--classify-cpus", "0"], "--classify-cpus must be >= 1"),
+    (["qc", "library", "kraken2", "--tabulate-mem", "8X"], "is not a valid PBS memory value"),
 ]
 
 @pytest.mark.parametrize("args,message", VALIDATION_ERRORS, ids=lambda x: " ".join(x) if isinstance(x, list) else None)
@@ -250,6 +261,8 @@ VALIDATION_WARNINGS = [
     (["call", "giraffe", "-i", "{tmp}/nowhere", "--afterok", "1.pbs"], "giraffe index"),
     (["map", "giraffe", "-i", "{tmp}/nowhere", "--afterok", "1.pbs"], "giraffe index"),
     (["call", "giraffe", "-i", "{giraffe}", "-b", "{bams}"], "sample(s) s1 are also samples in"),
+    (["qc", "library", "kraken2", "--db", "{k2db}", "--classify-mem", "1M"], "is less than the size of the kraken2 database"),
+    (["qc", "library", "kraken2", "-d", "{reads}", "--classify-walltime", "0:15"], "may be too short to classify 2 sample(s)"),
 ]
 
 @pytest.mark.parametrize("args,message", VALIDATION_WARNINGS, ids=lambda x: " ".join(x) if isinstance(x, list) else None)
@@ -344,6 +357,24 @@ def test_qc_library_fastqc_sizes_job(inputs, tmp_path):
     (tmp_path / "out" / "fastqc_summary.xlsx").write_text("")
     result = run_psst(["qc", "library", "fastqc", "--outdir", "out", "--name", "again"], tmp_path, check=False)
     assert "already exists" in result.stderr # the derived table is checked too
+
+def test_qc_library_kraken2_sizes_job(inputs, tmp_path):
+    result = run_psst(["qc", "library", "kraken2", "-d", inputs["reads"]], tmp_path)
+    assert "Found 2 paired sample(s) to classify" in result.stdout
+    assert "#PBS -J" not in open(tmp_path / "kraken2.sh").read() # samples run serially
+    assert "PREFIX=kraken_summary\n" in open(tmp_path / "kraken2_tabulate.sh").read()
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "x.reformat.tsv").write_text("")
+    result = run_psst(["qc", "library", "kraken2", "--outdir", "out", "-p", "x", "--name", "again"], tmp_path, check=False)
+    assert "already exists" in result.stderr
+
+def test_qsub_chains_qc_kraken2_jobs(inputs, tmp_path, fake_qsub):
+    env, logFile = fake_qsub
+    run_psst(["qc", "library", "kraken2", "-d", inputs["reads"], "--qsub", "--afterok", "99[].pbs"], tmp_path, env=env)
+    calls = open(logFile).read().splitlines()
+    assert calls == [f"{tmp_path}/kraken2.sh", f"-W depend=afterok:101[].pbs {tmp_path}/kraken2_tabulate.sh"] # the fake qsub's IDs
+    assert "#PBS -W depend=afterok:99[].pbs" in open(tmp_path / "kraken2.sh").read()
+    assert "depend" not in open(tmp_path / "kraken2_tabulate.sh").read()
 
 def test_qsub_chains_qc_fastqc_jobs(inputs, tmp_path, fake_qsub):
     env, logFile = fake_qsub

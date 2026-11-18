@@ -14,6 +14,7 @@
         "cactus_conda_env": "cactus",
         "readqc_conda_env": "readqc",
         "fastqc_module": "FastQC/0.12.1-Java-11",
+        "kraken2_conda_env": "kraken2",
         "salmon_dir": "/home/stewarz2/anaconda3/bin",
         "star_module": "STAR/2.7.11b",
         "minimap2_dir": "/home/stewarz2/various_programs/minimap2",
@@ -26,7 +27,8 @@
         "uniref90_fasta": "/home/stewarz2/various_programs/uniref_db/uniref90.fasta",
         "uniref_idmapping_file": "/home/stewarz2/various_programs/uniref_db/idmapping_selected.tab",
         "go_obo_file": "/home/stewarz2/various_programs/uniref_db/go.obo",
-        "braker_proteins_fasta": "/work/ePGL/databases/proteins/odb_12/plus_citrus/citrus_viridiplantae_proteins.fasta"
+        "braker_proteins_fasta": "/work/ePGL/databases/proteins/odb_12/plus_citrus/citrus_viridiplantae_proteins.fasta",
+        "kraken2_db": "/work/ePGL/databases/kraken2/citrus_plants_contaminants"
     },
     "references": {
         "reference_fasta": "/work/ePGL/genomes/citrus/bundaberg/Busk/Busk.hap1.fasta"

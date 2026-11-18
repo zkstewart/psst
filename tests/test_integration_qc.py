@@ -1,10 +1,12 @@
 # Integration tests of "qc library" modes on simulated reads, checking their outputs against
 # the simulation's truth: "trim" runs bbduk on reads which read through into adapters or end
-# in low-quality bases (requiring bbduk.sh on PATH), and "fastqc" runs FastQC then Various_scripts'
-# tabulate_fastqc.py (requiring fastqc on PATH, pandas and xlsxwriter, and Various_scripts at
-# $PSST_TEST_VARSCRIPTS, or else beside the psst repository).
+# in low-quality bases (requiring bbduk.sh on PATH), "fastqc" runs FastQC then Various_scripts'
+# tabulate_fastqc.py (requiring fastqc on PATH, pandas, xlsxwriter and openpyxl), and "kraken2" classifies
+# reads from known taxa against a small database built here, then combines and reformats the
+# reports (requiring kraken2, KrakenTools and Krona on PATH, and pandas). Various_scripts is
+# found at $PSST_TEST_VARSCRIPTS, or else beside the psst repository.
 
-import gzip, os, random, shutil
+import gzip, os, random, shutil, subprocess
 
 import pytest
 
@@ -89,6 +91,7 @@ def fastqc_reports(tmp_path_factory):
     require_tools("fastqc")
     pytest.importorskip("pandas")
     pytest.importorskip("xlsxwriter")
+    pytest.importorskip("openpyxl") # for pandas to read the table
     if not os.path.isfile(os.path.join(VARSCRIPTS, "QC", "reads", "tabulate_fastqc.py")):
         pytest.skip(f"requires Various_scripts at {VARSCRIPTS} (or set $PSST_TEST_VARSCRIPTS)")
     base = tmp_path_factory.mktemp("fastqc")
@@ -130,3 +133,102 @@ def test_fastqc(fastqc_reports):
     single = pd.read_excel(base / "fastqc_se" / "fastqc_summary.xlsx", sheet_name=None, index_col=0)
     assert list(single) == ["Forward Reads"] # single-end reads have no reverse reads
     assert single["Forward Reads"].loc["adapters", "total_reads"] == numPairs["adapters"]
+
+# A small taxonomy for a kraken2 database: (taxid, parent, rank, name)
+TAXA = [ (1, 1, "no rank", "root"), (2, 1, "superkingdom", "Bacteria"), (3, 2, "genus", "Simulobacter"),
+         (101, 3, "species", "Simulobacter alpha"), (102, 3, "species", "Simulobacter beta"),
+         (4, 1, "superkingdom", "Eukaryota"), (201, 4, "species", "Simulata host") ]
+
+# The number of read pairs simulated from each species' genome (None being random reads,
+# which kraken2 leaves unclassified)
+KRAKEN2_SAMPLES = { "S1": { 101: 600, 201: 300, None: 100 }, "S2": { 101: 500, 102: 500 } }
+
+def build_kraken2_db(rng, dbDir):
+    '''
+    Builds a kraken2 database of a random genome per species in TAXA, with a taxonomy in
+    the format of NCBI's nodes.dmp and names.dmp.
+
+    Returns:
+        genomes -- a dict of taxids to genome sequence strings.
+    '''
+    os.makedirs(os.path.join(dbDir, "taxonomy"))
+    with open(os.path.join(dbDir, "taxonomy", "nodes.dmp"), "w") as nodes, \
+         open(os.path.join(dbDir, "taxonomy", "names.dmp"), "w") as names:
+        for taxid, parent, rank, name in TAXA:
+            nodes.write(f"{taxid}\t|\t{parent}\t|\t{rank}\t|\t\t|\t0\t|\t1\t|\t11\t|\t1\t|\t0\t|\t1\t|\t1\t|\t0\t|\t\t|\n")
+            names.write(f"{taxid}\t|\t{name}\t|\t\t|\tscientific name\t|\n")
+    genomes = { taxid: "".join(sim.random_genome(rng, { "c": 30000 })["c"]) for taxid in [101, 102, 201] }
+    libraryFasta = os.path.join(dbDir, "genomes.fa")
+    sim.write_fasta(libraryFasta, { f"g{taxid}|kraken:taxid|{taxid}": seq for taxid, seq in genomes.items() })
+    for args in [["--add-to-library", libraryFasta], ["--build", "--threads", "2"]]:
+        subprocess.run(["kraken2-build", *args, "--db", dbDir], check=True, capture_output=True)
+    return genomes
+
+@pytest.fixture(scope="module")
+def kraken2_results(tmp_path_factory):
+    '''
+    Builds a small kraken2 database, simulates reads for samples mixing its species (and
+    random reads), then classifies and tabulates them with "qc library kraken2", with conda
+    stubbed out.
+
+    Returns:
+        base -- the work directory.
+    '''
+    require_tools("k2", "kraken2-build", "combine_kreports.py", "kreport2krona.py", "ktImportText")
+    pytest.importorskip("pandas")
+    if not os.path.isfile(os.path.join(VARSCRIPTS, "kraken", "kreport_reformat.py")):
+        pytest.skip(f"requires Various_scripts at {VARSCRIPTS} (or set $PSST_TEST_VARSCRIPTS)")
+    base = tmp_path_factory.mktemp("kraken2")
+    rng = random.Random(2)
+    genomes = build_kraken2_db(rng, str(base / "db"))
+    (base / "reads").mkdir()
+    for sample, mix in KRAKEN2_SAMPLES.items():
+        pairs = []
+        for taxid, n in mix.items():
+            genome = genomes[taxid] if taxid != None else "".join(rng.choice(sim.BASES) for _ in range(30000))
+            for _ in range(n):
+                start = rng.randint(0, len(genome) - 400)
+                fragment = genome[start:start+400]
+                pairs.append((fragment[:150], sim.revcomp(fragment)[:150]))
+        rng.shuffle(pairs)
+        with gzip.open(base / "reads" / f"{sample}_1.fq.gz", "wt") as out1, gzip.open(base / "reads" / f"{sample}_2.fq.gz", "wt") as out2:
+            for i, (r1, r2) in enumerate(pairs):
+                out1.write(f"@p{i}\n{r1}\n+\n{'I' * len(r1)}\n")
+                out2.write(f"@p{i}\n{r2}\n+\n{'I' * len(r2)}\n")
+
+    binDir = base / "bin"
+    binDir.mkdir()
+    os.symlink(os.path.join(STUBS_DIR, "kraken2", "conda"), binDir / "conda")
+    env = dict(os.environ)
+    env["PATH"] = f"{binDir}{os.pathsep}{env['PATH']}"
+    run_psst(["qc", "library", "kraken2", "-d", str(base / "reads"), "--db", str(base / "db"),
+              "--varscripts", VARSCRIPTS, "--classify-cpus", "2"], base)
+    run_array_job(str(base / "kraken2.sh"), str(base), env=env)
+    run_job(str(base / "kraken2_tabulate.sh"), str(base), env=env)
+    return base
+
+def test_kraken2(kraken2_results):
+    import pandas as pd
+    base = kraken2_results
+    for sample in KRAKEN2_SAMPLES:
+        sampleDir = base / "kraken2" / sample
+        assert sorted(os.listdir(sampleDir)) == sorted([f"{sample}_{r}_{c}.fastq" for r in [1, 2] for c in ["classified", "unclassified"]] +
+                                                       [f"{sample}_output.txt", f"{sample}_report.html", f"{sample}_report.krona", f"{sample}_report.txt"])
+        assert len(read_fastq_plain(sampleDir / f"{sample}_1_unclassified.fastq")) == KRAKEN2_SAMPLES[sample].get(None, 0)
+    
+    # Each sample's fraction of reads per taxon matches the simulated mix
+    table = pd.read_csv(base / "kraken2" / "kraken_summary.reformat.tsv", sep="\t")
+    table["taxon"] = table["taxon"].str.strip()
+    table = table.set_index("taxon")
+    names = { taxid: name for taxid, _, _, name in TAXA }
+    for sample, mix in KRAKEN2_SAMPLES.items():
+        total = sum(mix.values())
+        assert table.loc["unclassified", sample] == mix.get(None, 0) / total
+        for taxid in [101, 102, 201]:
+            assert table.loc[names[taxid], sample] == mix.get(taxid, 0) / total
+    combined = open(base / "kraken2" / "kraken_summary.tsv").read()
+    assert "#Number of Samples: 2" in combined
+
+def read_fastq_plain(fileName):
+    with open(fileName) as fileIn:
+        return fileIn.read().splitlines()[::4]

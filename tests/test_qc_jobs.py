@@ -1,6 +1,6 @@
 # Tests of the "qc library" job scripts' own logic (i.e., finding each subjob's reads, naming
 # outputs, skipping finished samples and never leaving partial output under a final name),
-# run against stubs (see stubs/bbduk and stubs/fastqc, and a stand-in tabulate_fastqc.py).
+# run against stubs (see stubs/bbduk, stubs/fastqc and stubs/kraken2, and stand-in Various_scripts).
 
 import os
 
@@ -142,7 +142,7 @@ def generate_fastqc(fastqc_setup, args):
     run_psst(["qc", "library", "fastqc", "--varscripts", varScriptDir, *args], workDir)
     return os.path.join(workDir, "fastqc.sh"), os.path.join(workDir, "fastqc_tabulate.sh")
 
-def fastqc_calls(stubDir, tool="fastqc"):
+def stub_calls(stubDir, tool="fastqc"):
     logFile = os.path.join(stubDir, f"{tool}.log")
     return [ line.split("|") for line in open(logFile).read().splitlines() ] if os.path.exists(logFile) else []
 
@@ -154,10 +154,10 @@ def test_fastqc_then_tabulate(fastqc_setup, tmp_path):
     assert sorted(os.listdir(outDir)) == ["A", "B"]
     assert sorted(os.listdir(os.path.join(outDir, "A"))) == ["A_R1_fastqc.html", "A_R1_fastqc.zip",
                                                              "A_R2_fastqc.html", "A_R2_fastqc.zip"]
-    assert fastqc_calls(stubDir)[0] == ["--outdir", "fastqc/A.incomplete", "--threads", "2",
+    assert stub_calls(stubDir)[0] == ["--outdir", "fastqc/A.incomplete", "--threads", "2",
                                         f"{tmp_path}/paired/A_R1.fq.gz", f"{tmp_path}/paired/A_R2.fq.gz"]
     run_job(tabulateScript, workDir, env=env)
-    assert fastqc_calls(stubDir, "tabulate") == [["-i", "fastqc", "-o", "fastqc/fastqc_summary.incomplete.xlsx"]]
+    assert stub_calls(stubDir, "tabulate") == [["-i", "fastqc", "-o", "fastqc/fastqc_summary.incomplete.xlsx"]]
     assert sorted(os.listdir(outDir)) == ["A", "B", "fastqc_summary.xlsx"]
     result = run_job(tabulateScript, workDir, env=env, check=False) # refuses to overwrite the table
     assert result.returncode != 0 and "already exists" in result.stdout
@@ -177,7 +177,7 @@ def test_fastqc_skips_checked_samples(fastqc_setup, tmp_path):
     run_job(fastqcScript, workDir, index=1, env=env)
     result = run_job(fastqcScript, workDir, index=1, env=env)
     assert "skipping A" in result.stdout
-    assert len(fastqc_calls(stubDir)) == 1
+    assert len(stub_calls(stubDir)) == 1
 
 def test_fastqc_failure_leaves_no_final_output(fastqc_setup, tmp_path):
     workDir, env, stubDir, _ = fastqc_setup
@@ -200,7 +200,7 @@ def test_tabulate_checks_reports(prepare, message, fastqc_setup, tmp_path):
     result = run_job(tabulateScript, workDir, env=env, check=False)
     assert result.returncode != 0
     assert message in result.stdout
-    assert fastqc_calls(stubDir, "tabulate") == []
+    assert stub_calls(stubDir, "tabulate") == []
 
 def test_tabulate_failure_leaves_no_table(fastqc_setup, tmp_path):
     workDir, env, stubDir, _ = fastqc_setup
@@ -211,3 +211,113 @@ def test_tabulate_failure_leaves_no_table(fastqc_setup, tmp_path):
     assert not os.path.exists(os.path.join(workDir, "fastqc", "fastqc_summary.xlsx"))
     run_job(tabulateScript, workDir, env=env) # a rerun replaces the incomplete table
     assert sorted(os.listdir(os.path.join(workDir, "fastqc"))) == ["A", "B", "fastqc_summary.xlsx"]
+
+@pytest.fixture
+def kraken2_setup(setup, tmp_path):
+    '''
+    Extends setup with the kraken2 stubs on PATH, a database directory, and a
+    Various_scripts directory holding a stand-in kreport_reformat.py.
+
+    Returns:
+        (workDir, env, stubDir, args) -- as for setup, plus the psst arguments giving the
+            database and Various_scripts locations.
+    '''
+    workDir, env, stubDir = setup
+    varScriptDir = tmp_path / "Various_scripts"
+    (varScriptDir / "kraken").mkdir(parents=True)
+    (varScriptDir / "kraken" / "kreport_reformat.py").write_text(TABULATE_STUB)
+    db = tmp_path / "k2db"
+    db.mkdir()
+    (db / "hash.k2d").write_text("")
+    env = dict(env)
+    env["PATH"] = f"{os.path.join(STUBS_DIR, 'kraken2')}{os.pathsep}{env['PATH']}"
+    return workDir, env, stubDir, ["--db", str(db), "--varscripts", str(varScriptDir)]
+
+def generate_kraken2(kraken2_setup, args):
+    workDir, _, _, setupArgs = kraken2_setup
+    run_psst(["qc", "library", "kraken2", *setupArgs, *args], workDir)
+    return os.path.join(workDir, "kraken2.sh"), os.path.join(workDir, "kraken2_tabulate.sh")
+
+def test_kraken2_then_tabulate(kraken2_setup, tmp_path):
+    workDir, env, stubDir, _ = kraken2_setup
+    classifyScript, tabulateScript = generate_kraken2(kraken2_setup, ["-d", str(tmp_path / "paired"), "--classify-cpus", "2"])
+    assert "#PBS -J" not in open(classifyScript).read() # samples run serially, not as an array
+    result = run_job(classifyScript, workDir, env=env)
+    assert result.stdout.count("Reading the kraken2 database") == 1
+    outDir = os.path.join(workDir, "kraken2")
+    assert sorted(os.listdir(outDir)) == ["A", "B"]
+    assert sorted(os.listdir(os.path.join(outDir, "A"))) == [
+        "A_1_classified.fastq", "A_1_unclassified.fastq", "A_2_classified.fastq", "A_2_unclassified.fastq",
+        "A_output.txt", "A_report.html", "A_report.krona", "A_report.txt"]
+    assert stub_calls(stubDir, "k2")[0] == [
+        "classify", "--threads", "2", "--db", f"{tmp_path}/k2db", "--memory-mapping",
+        "--output", "kraken2/A.incomplete/A_output.txt",
+        "--unclassified-out", "kraken2/A.incomplete/A#_unclassified.fastq",
+        "--classified-out", "kraken2/A.incomplete/A#_classified.fastq",
+        "--report", "kraken2/A.incomplete/A_report.txt",
+        "--paired", f"{tmp_path}/paired/A_R1.fq.gz", f"{tmp_path}/paired/A_R2.fq.gz"]
+    assert [ c[-1] for c in stub_calls(stubDir, "k2") ] == [f"{tmp_path}/paired/A_R2.fq.gz", f"{tmp_path}/paired/B.2.fq.gz"]
+    assert stub_calls(stubDir, "ktImportText")[0] == [
+        "kraken2/A.incomplete/A_report.krona", "-o", "kraken2/A.incomplete/A_report.html"]
+    run_job(tabulateScript, workDir, env=env)
+    assert stub_calls(stubDir, "combine_kreports.py") == [[
+        "-r", "kraken2/A/A_report.txt", "kraken2/B/B_report.txt", "-o", "kraken2/kraken_summary.incomplete.tsv"]]
+    assert stub_calls(stubDir, "tabulate") == [[
+        "-i", "kraken2/kraken_summary.incomplete.tsv", "-o", "kraken2/kraken_summary.reformat.incomplete.tsv"]]
+    assert sorted(os.listdir(outDir)) == ["A", "B", "kraken_summary.reformat.tsv", "kraken_summary.tsv"]
+    result = run_job(tabulateScript, workDir, env=env, check=False) # refuses to overwrite the tables
+    assert result.returncode != 0 and "already exists" in result.stdout
+
+def test_kraken2_single_end(kraken2_setup, tmp_path):
+    workDir, env, stubDir, _ = kraken2_setup
+    classifyScript, tabulateScript = generate_kraken2(kraken2_setup, ["-d", str(tmp_path / "single"), "--singleEnd",
+                                                                      "-p", "run1"])
+    run_array_job(classifyScript, workDir, env=env)
+    assert sorted(os.listdir(os.path.join(workDir, "kraken2", "C"))) == [
+        "C_classified.fastq", "C_output.txt", "C_report.html", "C_report.krona", "C_report.txt", "C_unclassified.fastq"]
+    call = stub_calls(stubDir, "k2")[0]
+    assert "--paired" not in call and call[-1] == f"{tmp_path}/single/C.fq.gz"
+    run_job(tabulateScript, workDir, env=env)
+    assert os.path.exists(os.path.join(workDir, "kraken2", "run1.reformat.tsv"))
+
+def test_kraken2_skips_classified_samples(kraken2_setup, tmp_path):
+    workDir, env, stubDir, _ = kraken2_setup
+    classifyScript, _ = generate_kraken2(kraken2_setup, ["-d", str(tmp_path / "paired")])
+    os.makedirs(os.path.join(workDir, "kraken2", "A"))
+    result = run_job(classifyScript, workDir, env=env)
+    assert "skipping A" in result.stdout
+    assert [ c[-1] for c in stub_calls(stubDir, "k2") ] == [f"{tmp_path}/paired/B.2.fq.gz"] # only B is classified
+    result = run_job(classifyScript, workDir, env=env) # with every sample done, the database isn't read
+    assert "skipping B" in result.stdout and "Reading the kraken2 database" not in result.stdout
+    assert len(stub_calls(stubDir, "k2")) == 1
+
+def test_kraken2_failure_leaves_no_final_output(kraken2_setup, tmp_path):
+    workDir, env, stubDir, _ = kraken2_setup
+    classifyScript, _ = generate_kraken2(kraken2_setup, ["-d", str(tmp_path / "paired")])
+    result = run_job(classifyScript, workDir, env=dict(env, STUB_FAIL="1"), check=False)
+    assert result.returncode != 0
+    assert os.listdir(os.path.join(workDir, "kraken2")) == ["A.incomplete"] # the job stops at the first failure
+    assert stub_calls(stubDir, "kreport2krona.py") == [] # nothing runs after a failed classification
+    run_job(classifyScript, workDir, env=env) # a rerun replaces the incomplete output
+    assert sorted(os.listdir(os.path.join(workDir, "kraken2"))) == ["A", "B"]
+    assert len(os.listdir(os.path.join(workDir, "kraken2", "A"))) == 8
+
+def test_kraken2_tabulate_checks_reports(kraken2_setup, tmp_path):
+    workDir, env, stubDir, _ = kraken2_setup
+    classifyScript, tabulateScript = generate_kraken2(kraken2_setup, ["-d", str(tmp_path / "paired")])
+    os.makedirs(os.path.join(workDir, "kraken2", "A")) # as if only sample A were classified
+    open(os.path.join(workDir, "kraken2", "A", "A_report.txt"), "w").close()
+    result = run_job(tabulateScript, workDir, env=env, check=False)
+    assert result.returncode != 0
+    assert "kraken2/B/B_report.txt was not found" in result.stdout
+    assert stub_calls(stubDir, "combine_kreports.py") == []
+
+def test_kraken2_tabulate_failure_leaves_no_tables(kraken2_setup, tmp_path):
+    workDir, env, stubDir, _ = kraken2_setup
+    classifyScript, tabulateScript = generate_kraken2(kraken2_setup, ["-d", str(tmp_path / "paired")])
+    run_array_job(classifyScript, workDir, env=env)
+    result = run_job(tabulateScript, workDir, env=dict(env, STUB_FAIL="1"), check=False)
+    assert result.returncode != 0
+    assert sorted(f for f in os.listdir(os.path.join(workDir, "kraken2")) if not f.endswith("incomplete.tsv")) == ["A", "B"]
+    run_job(tabulateScript, workDir, env=env) # a rerun replaces the incomplete tables
+    assert sorted(os.listdir(os.path.join(workDir, "kraken2"))) == ["A", "B", "kraken_summary.reformat.tsv", "kraken_summary.tsv"]

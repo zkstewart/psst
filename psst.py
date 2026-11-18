@@ -48,7 +48,7 @@ from modules.validation import \
         validate_pg_create, \
     validate_qc, \
         validate_qc_library, \
-            validate_qc_library_trim, validate_qc_library_fastqc, \
+            validate_qc_library_trim, validate_qc_library_fastqc, validate_qc_library_kraken2, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding, assembly_braker3
@@ -59,11 +59,11 @@ from modules.calling import call_variants, call_filter
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
 from modules.hic import hic_contacts
 from modules.pangenome import pangenome_create
-from modules.qc import qc_library_trim, qc_library_fastqc
+from modules.qc import qc_library_trim, qc_library_fastqc, qc_library_kraken2
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, READQC_CONDA_ENV, FASTQC_MODULE, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
-    REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, BRAKER_PROTEINS_FASTA, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, READQC_CONDA_ENV, FASTQC_MODULE, KRAKEN2_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
+    REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, BRAKER_PROTEINS_FASTA, KRAKEN2_DB, \
     REFERENCE_FASTA
 from _version import __version__
 
@@ -1799,6 +1799,48 @@ def main():
                                walltime="00:30:00", mem="4G", cpus=1)
     add_pbs_submission_arguments(qcfastqcparser)
     
+    # QC > library > kraken2 mode
+    qckrakenparser = subQcLibraryParsers.add_parser("kraken2",
+                                                    parents=[p],
+                                                    add_help=False,
+                                                    help="""Classify reads taxonomically with kraken2 (one sample after another,
+                                                    loading the database once), then combine every sample's report into tables""")
+    qckrakenparser.set_defaults(func=qc_library_kraken2)
+    add_reads_arguments(qckrakenparser, allowSingleEnd=True)
+    qckrakenparser.add_argument("--db", dest="db",
+                                required=False,
+                                action=UserSet,
+                                help="""Optionally, specify the kraken2 database directory;
+                                default == '%(default)s'""",
+                                default=KRAKEN2_DB)
+    qckrakenparser.add_argument("--outdir", dest="outputDir",
+                                required=False,
+                                help="""Optionally, specify the output directory, relative to the
+                                directory the job is submitted from, where each sample's results are
+                                written to <outdir>/<sample>/; default == '%(default)s'""",
+                                default="kraken2")
+    qckrakenparser.add_argument("-p", "--prefix", dest="prefix",
+                                required=False,
+                                help="""Optionally, specify the prefix of the combined tables written to
+                                --outdir as <prefix>.tsv and <prefix>.reformat.tsv; default == '%(default)s'""",
+                                default="kraken_summary")
+    qckrakenparser.add_argument("--conda", dest="condaEnv",
+                                required=False,
+                                help="""Optionally, specify the conda environment containing kraken2,
+                                KrakenTools, Krona and pandas; default == '%(default)s'""",
+                                default=KRAKEN2_CONDA_ENV)
+    add_varscripts_argument(qckrakenparser)
+    qckrakenparser.add_argument("--name", dest="jobName",
+                                required=False,
+                                help="""Optionally, specify the PBS job name, which also names the job
+                                scripts '<name>.sh' and '<name>_tabulate.sh'; default == '%(default)s'""",
+                                default="kraken2")
+    add_pbs_resource_arguments(qckrakenparser, step="classify", title="PBS resources: kraken2 (all samples)",
+                               walltime="08:00:00", mem="160G", cpus=4)
+    add_pbs_resource_arguments(qckrakenparser, step="tabulate", title="PBS resources: report tabulation",
+                               walltime="00:10:00", mem="10G", cpus=1)
+    add_pbs_submission_arguments(qckrakenparser)
+    
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
@@ -1988,6 +2030,9 @@ def qcmain(args):
         if args.qcLibraryMode == "fastqc":
             print("## FastQC read checking ##")
             validate_qc_library_fastqc(args)
+        if args.qcLibraryMode == "kraken2":
+            print("## kraken2 read classification ##")
+            validate_qc_library_kraken2(args)
 
 if __name__ == "__main__":
     main()

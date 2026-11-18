@@ -1,0 +1,17 @@
+#!/bin/bash
+# A stand-in for kraken2's k2, which records its arguments (one call per line, separated
+# by '|') in $STUB_DIR/k2.log and writes empty classify outputs (replacing '#' in the
+# (un)classified read names with _1 and _2, as kraken2 does for paired reads). If
+# $STUB_FAIL is set, it fails after writing them, as an interrupted run would.
+set -e
+( IFS="|"; echo "$*" ) >> "${STUB_DIR}/k2.log"
+while (( $# > 0 )); do
+    case $1 in
+        --output|--report) touch "$2"; shift 2 ;;
+        --classified-out|--unclassified-out)
+            if [[ $2 == *"#"* ]]; then touch "${2/\#/_1}" "${2/\#/_2}"; else touch "$2"; fi
+            shift 2 ;;
+        *) shift ;;
+    esac
+done
+[[ -z ${STUB_FAIL} ]]

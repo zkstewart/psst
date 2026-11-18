@@ -12,7 +12,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from .mapping import get_array_size
-from .pbs import PLACEHOLDER_REGEX, fill_template, format_pbs_header, write_job_script, submit_job, check_placeholders, finalise_job
+from .pbs import finalise_job, finalise_chained_jobs
 
 def qc_library_trim(args):
     '''
@@ -56,45 +56,51 @@ def qc_library_fastqc(args):
         "paired": "false" if args.singleEnd else "true",
         "outputDir": args.outputDir
     }
-    jobs = [ # step, template, template values, extra header arguments
+    finalise_chained_jobs(args, [ # step, template, template values, array size
         ("fastqc", "qc/run_fastqc.sh", {
             **reads,
             "fastqcModule": args.fastqcModule,
             "cpus": args.fastqcCpus
-        }, { "afterok": args.afterok, "afternotok": args.afternotok,
-             "arraySize": get_array_size(args.numSamples) }),
+        }, get_array_size(args.numSamples)),
         ("tabulate", "qc/run_tabulate_fastqc.sh", {
             **reads,
             "varScriptDir": args.varScriptDir,
             "outputFile": args.outputFile
-        }, {})
-    ]
+        }, None)
+    ])
 
-    # Render both scripts before writing either, so placeholders block --qsub up front
-    scripts = []
-    missing = []
-    for step, templateName, values, headerArgs in jobs:
-        body, stepMissing = fill_template(templateName, values)
-        jobName = args.jobName if step == "fastqc" else f"{args.jobName}_{step}"
-        header = format_pbs_header(jobName,
-                                   getattr(args, f"{step}Walltime"),
-                                   getattr(args, f"{step}Mem"),
-                                   getattr(args, f"{step}Cpus"),
-                                   args.rpid, **headerArgs)
-        scripts.append((args.scriptFiles[step], header, body))
-        stepMissing = PLACEHOLDER_REGEX.findall(header) + stepMissing # e.g., the array size
-        missing += [ m for m in stepMissing if m not in missing ]
-    if args.qsub and missing != []:
-        check_placeholders(args, missing) # raises an error before anything is written
+def qc_library_kraken2(args):
+    '''
+    Generates (and optionally submits) the two PBS job scripts of "qc library kraken2":
+        <name>.sh -- classifies each sample's reads in turn with kraken2, writing its
+                     classifications, report, (un)classified reads and a Krona chart to
+                     <outdir>/<sample>/; samples run serially in one job (not an array),
+                     since loading the database takes far longer than classifying a sample
+        <name>_tabulate.sh -- combines every sample's report with KrakenTools'
+                              combine_kreports.py, then reformats it with Various_scripts'
+                              kreport_reformat.py
 
-    for scriptFile, header, body in scripts:
-        write_job_script(scriptFile, header, body)
-    check_placeholders(args, missing)
+    With --qsub, the tabulation job is submitted to run after the kraken2 job succeeds.
 
-    # Submit the tabulation job to follow the FastQC job
-    if args.qsub:
-        fastqcID = submit_job(args.scriptFiles["fastqc"])
-        submit_job(args.scriptFiles["tabulate"], afterok=fastqcID)
-    else:
-        print(f"Submit '{args.scriptFiles['tabulate']}' to run after the FastQC job succeeds, " +
-              "i.e., with 'qsub -W depend=afterok:<FastQC job ID>'")
+    Parameters:
+        args -- an argparse.Namespace containing validated "qc library kraken2" arguments.
+    '''
+    reads = {
+        "condaEnv": args.condaEnv,
+        "readsDir": args.readsDir,
+        "readsSuffix": args.readsSuffix,
+        "paired": "false" if args.singleEnd else "true",
+        "outputDir": args.outputDir
+    }
+    finalise_chained_jobs(args, [ # step, template, template values, array size
+        ("classify", "qc/run_kraken2.sh", {
+            **reads,
+            "db": args.db,
+            "cpus": args.classifyCpus
+        }, None),
+        ("tabulate", "qc/run_tabulate_kraken2.sh", {
+            **reads,
+            "varScriptDir": args.varScriptDir,
+            "prefix": args.prefix
+        }, None)
+    ])
