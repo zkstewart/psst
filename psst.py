@@ -46,6 +46,9 @@ from modules.validation import \
             validate_m_rna_salmon, validate_m_rna_star, \
     validate_pg, \
         validate_pg_create, \
+    validate_qc, \
+        validate_qc_library, \
+            validate_qc_library_trim, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding, assembly_braker3
@@ -56,9 +59,10 @@ from modules.calling import call_variants, call_filter
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
 from modules.hic import hic_contacts
 from modules.pangenome import pangenome_create
+from modules.qc import qc_library_trim
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, READQC_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, BRAKER_PROTEINS_FASTA, \
     REFERENCE_FASTA
 from _version import __version__
@@ -1700,6 +1704,65 @@ def main():
     add_pbs_arguments(mrnastarparser, jobName="star_align",
                       walltime="04:00:00", mem="20G", cpus=4)
     
+    # QC subparser
+    qcparser = subparsers.add_parser("qc",
+                                     parents=[p],
+                                     add_help=False,
+                                     help="Quality control jobs")
+    
+    subQcParsers = qcparser.add_subparsers(dest="qcMode",
+                                           required=True)
+    
+    # QC > library subparser
+    qclibraryparser = subQcParsers.add_parser("library",
+                                              parents=[p],
+                                              add_help=False,
+                                              help="Sequencing library quality control")
+    
+    subQcLibraryParsers = qclibraryparser.add_subparsers(dest="qcLibraryMode",
+                                                         required=True)
+    
+    # QC > library > trim mode
+    qctrimparser = subQcLibraryParsers.add_parser("trim",
+                                                  parents=[p],
+                                                  add_help=False,
+                                                  help="""Trim adapters and low-quality ends from short reads with
+                                                  bbduk (an array job with one subjob per sample)""")
+    qctrimparser.set_defaults(func=qc_library_trim, scriptSuffix="trim_reads")
+    add_reads_arguments(qctrimparser, allowSingleEnd=True)
+    qctrimparser.add_argument("--outdir", dest="outputDir",
+                              required=False,
+                              help="""Optionally, specify the output directory, relative to the
+                              directory the job is submitted from, where trimmed reads are written
+                              as <sample>_1.fq.gz and <sample>_2.fq.gz (or <sample>.fq.gz if
+                              single-end); default == '%(default)s'""",
+                              default="trimmed")
+    qctrimparser.add_argument("--adapters", dest="adapters",
+                              required=False,
+                              action=UserSet,
+                              help="""Optionally, specify a FASTA file of adapter sequences to trim;
+                              default == '%(default)s', the adapters bundled with BBTools""",
+                              default="adapters")
+    qctrimparser.add_argument("--trimq", dest="trimq",
+                              required=False,
+                              type=int,
+                              help="""Optionally, specify the quality to trim both read ends to;
+                              default == %(default)s""",
+                              default=5)
+    qctrimparser.add_argument("--minlen", dest="minLength",
+                              required=False,
+                              type=int,
+                              help="""Optionally, specify the minimum length of trimmed reads to keep,
+                              with shorter reads discarded along with their mates; default == %(default)s""",
+                              default=25)
+    qctrimparser.add_argument("--conda", dest="condaEnv",
+                              required=False,
+                              help="""Optionally, specify the conda environment containing BBTools;
+                              default == '%(default)s'""",
+                              default=READQC_CONDA_ENV)
+    add_pbs_arguments(qctrimparser, jobName="trim_reads",
+                      walltime="06:00:00", mem="35G", cpus=4)
+    
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
@@ -1747,6 +1810,10 @@ def main():
         print("## psst.py - Read mapping handling ##")
         validate_m(args)
         mmain(args)
+    if args.mode == "qc":
+        print("## psst.py - Quality control handling ##")
+        validate_qc(args)
+        qcmain(args)
     
     # Validate PBS arguments and write (+/- submit) the job script(s)
     if args.pbsMode != None:
@@ -1874,6 +1941,14 @@ def pgmain(args):
     if args.pangenomeMode == "create":
         print("## cactus-pangenome graph creation ##")
         validate_pg_create(args)
+
+def qcmain(args):
+    # Split into sub-mode-specific validation functions
+    if args.qcMode == "library":
+        validate_qc_library(args)
+        if args.qcLibraryMode == "trim":
+            print("## bbduk read trimming ##")
+            validate_qc_library_trim(args)
 
 if __name__ == "__main__":
     main()

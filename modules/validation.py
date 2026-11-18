@@ -1239,3 +1239,49 @@ def validate_cl_cdhit(args):
     # Validate the .clstr output file, which run_clustering.py will not overwrite
     if args.outputFile != None and os.path.exists(args.outputFile + ".clstr"):
         raise FileExistsError(f"Output file ({args.outputFile}.clstr) already exists!")
+
+def validate_qc(args):
+    '''
+    Validation for arguments common to all "qc" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_qc_library(args):
+    '''
+    Validation for arguments common to all "qc library" mode commands.
+    '''
+    pass # no specific validation needed for this mode
+
+def validate_qc_library_trim(args):
+    '''
+    Validation for arguments used in "qc library trim" mode. If a reads directory was
+    given, its samples are counted to determine the array job size. Sets args.xmx, the
+    Java heap for bbduk, from --mem.
+    '''
+    samples = validate_reads(args, args.singleEnd)
+    args.numSamples = None
+    if samples != None:
+        args.numSamples = len(samples)
+        print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to trim")
+    
+    # Validate the output directory, whose trimmed reads could replace the input reads
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if args.readsDir != None and os.path.realpath(args.outputDir) == os.path.realpath(args.readsDir):
+        raise ValueError(f"--outdir must differ from the reads directory (-d {args.readsDir})")
+    
+    # Validate the adapters, which may be the keyword for BBTools' bundled adapters
+    if args.adapters != "adapters":
+        validate_input_file(args, "adapters", "--adapters", "Adapters FASTA file")
+    
+    # Validate behavioural parameters
+    if args.trimq < 0:
+        raise ValueError("--trimq must be >= 0")
+    if args.minLength < 1:
+        raise ValueError("--minlen must be >= 1")
+    if re.match(r"^\S+$", args.condaEnv) == None:
+        raise FormatError(f"--conda '{args.condaEnv}' must be non-empty and not contain whitespace")
+    
+    # Give bbduk's Java heap most of --mem, since it otherwise sizes it from the whole node
+    args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
+    args.xmx = f"{max(1, int(parse_mem_gb(args.mem) * 1024 * 0.75))}m"

@@ -35,6 +35,7 @@ def test_modes_are_discovered():
     assert ("call", "short") in MODES
     assert ("map", "index", "giraffe") in MODES
     assert ("hic", "contacts") in MODES
+    assert ("qc", "library", "trim") in MODES
 
 @pytest.mark.parametrize("mode", MODES, ids=" ".join)
 def test_mode_generates_with_only_rpid(mode, tmp_path):
@@ -212,6 +213,17 @@ VALIDATION_ERRORS = [
     (["map", "index", "giraffe", "-g", "{genome}.missing"], "Pangenome GBZ file"),
     (["map", "index", "giraffe", "--refsample", "a b"], "must not contain whitespace or '#'"),
     (["map", "index", "giraffe", "-g", "{gbz}", "-o", "{giraffe}"], "already exists"),
+    # qc modes
+    (["qc", "library", "trim", "-d", "{unpaired}"], "has no matching reverse read file"),
+    (["qc", "library", "trim", "-d", "{genome}.missing"], "Reads directory (-d"),
+    (["qc", "library", "trim", "-rs", ""], "-rs must be given a non-empty value"),
+    (["qc", "library", "trim", "-d", "{reads}", "--outdir", "{reads}/../reads"], "--outdir must differ from the reads directory"),
+    (["qc", "library", "trim", "--outdir", ""], "--outdir must be given a non-empty value"),
+    (["qc", "library", "trim", "--adapters", "{genome}.missing"], "Adapters FASTA file (--adapters"),
+    (["qc", "library", "trim", "--trimq", "-1"], "--trimq must be >= 0"),
+    (["qc", "library", "trim", "--minlen", "0"], "--minlen must be >= 1"),
+    (["qc", "library", "trim", "--conda", "a b"], "--conda 'a b' must be non-empty"),
+    (["qc", "library", "trim", "--mem", "8X"], "is not a valid PBS memory value"),
 ]
 
 @pytest.mark.parametrize("args,message", VALIDATION_ERRORS, ids=lambda x: " ".join(x) if isinstance(x, list) else None)
@@ -302,6 +314,17 @@ def test_call_short_hic_sets_orphans(tmp_path):
 def test_map_short_hic_sets_flag(tmp_path):
     run_psst(["map", "short", "--hic"], tmp_path)
     assert "HIC=true" in open(tmp_path / "map_short.sh").read()
+
+def test_qc_library_trim_sizes_job(inputs, tmp_path):
+    result = run_psst(["qc", "library", "trim", "-d", inputs["reads"], "--mem", "2gb"], tmp_path)
+    assert "Found 2 paired sample(s) to trim" in result.stdout
+    text = open(tmp_path / "trim_reads.sh").read()
+    assert "#PBS -J 1-2\n" in text
+    assert f"READSDIR={inputs['reads']}\n" in text and "XMX=1536m" in text and "CONDAENV=readqc\n" in text
+    run_psst(["qc", "library", "trim", "-d", inputs["unpaired"], "--singleEnd", "--conda", "bbtools",
+              "--script", "s.sh"], tmp_path) # one sample needs no array
+    text = open(tmp_path / "s.sh").read()
+    assert "#PBS -J" not in text and "PAIRED=false #" in text and "CONDAENV=bbtools\n" in text
 
 def test_map_index_giraffe_derives_index(inputs, tmp_path):
     run_psst(["map", "index", "giraffe", "-g", inputs["gbz"]], tmp_path)

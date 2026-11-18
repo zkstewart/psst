@@ -209,6 +209,59 @@ def simulate_long_reads(rng, haplotypes, fileName, coverage):
                 i += 1
                 fileOut.write(f"@r{i}\n{read}\n+\n{'5' * len(read)}\n")
 
+# Illumina TruSeq adapters, read through into read 1 and read 2 when the insert is
+# shorter than the read length
+ADAPTER_R1 = "AGATCGGAAGAGCACACGTCTGAACTCCAGTCA"
+ADAPTER_R2 = "AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT"
+
+def simulate_trimming_reads(rng, genome, prefix, numPairs, readLength=150, lowQualLength=30):
+    '''
+    Writes paired reads for testing adapter and quality trimming as <prefix>_1.fq.gz and
+    <prefix>_2.fq.gz, alternating between pairs from inserts shorter than the read length
+    (reading through into adapters, then random bases), pairs ending in random bases of
+    quality 2 (one read each), and untouched pairs.
+
+    Parameters:
+        rng -- a random.Random instance.
+        genome -- a dict of contig IDs to sequence strings.
+        prefix -- a string of the output file prefix.
+        numPairs -- an int of the number of read pairs to write.
+        readLength -- OPTIONAL; an int of the read length.
+        lowQualLength -- OPTIONAL; an int of the length of low-quality read ends.
+    Returns:
+        truth -- a dict of read names to (read1, read2) tuples of the reads' sequences
+                 once trimmed (i.e., without adapters or low-quality ends).
+    '''
+    contigs = list(genome)
+    weights = [ len(genome[c]) for c in contigs ]
+    truth = {}
+    with gzip.open(f"{prefix}_1.fq.gz", "wt") as out1, gzip.open(f"{prefix}_2.fq.gz", "wt") as out2:
+        for i in range(numPairs):
+            kind = i % 3
+            insert = rng.randint(5, readLength - 1) if kind == 0 else rng.randint(readLength, 500)
+            seq = genome[rng.choices(contigs, weights)[0]]
+            start = rng.randint(0, len(seq) - insert)
+            fragment = seq[start:start+insert]
+            r1, r2 = fragment[:readLength], revcomp(fragment)[:readLength]
+            truth[f"p{i}"] = (r1, r2)
+            q1, q2 = "I" * len(r1), "I" * len(r2)
+            if kind == 0: # read through the insert into the adapters, then random bases
+                filler = lambda: "".join(rng.choice(BASES) for _ in range(readLength))
+                r1 = (r1 + ADAPTER_R1 + filler())[:readLength]
+                r2 = (r2 + ADAPTER_R2 + filler())[:readLength]
+                q1 = q2 = "I" * readLength
+            elif kind == 1: # end one read with low-quality random bases
+                tail = "".join(rng.choice(BASES) for _ in range(lowQualLength))
+                if rng.random() < 0.5:
+                    truth[f"p{i}"] = (r1[:-lowQualLength], r2)
+                    r1, q1 = r1[:-lowQualLength] + tail, q1[:-lowQualLength] + "#" * lowQualLength
+                else:
+                    truth[f"p{i}"] = (r1, r2[:-lowQualLength])
+                    r2, q2 = r2[:-lowQualLength] + tail, q2[:-lowQualLength] + "#" * lowQualLength
+            out1.write(f"@p{i}\n{r1}\n+\n{q1}\n")
+            out2.write(f"@p{i}\n{r2}\n+\n{q2}\n")
+    return truth
+
 def simulate_pangenome(rng, genome):
     '''
     Simulates the variants of a pangenome with two diploid samples (P1 and P2) relative
