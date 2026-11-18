@@ -224,6 +224,14 @@ VALIDATION_ERRORS = [
     (["qc", "library", "trim", "--minlen", "0"], "--minlen must be >= 1"),
     (["qc", "library", "trim", "--conda", "a b"], "--conda 'a b' must be non-empty"),
     (["qc", "library", "trim", "--mem", "8X"], "is not a valid PBS memory value"),
+    (["qc", "library", "fastqc", "-d", "{unpaired}"], "has no matching reverse read file"),
+    (["qc", "library", "fastqc", "-o", "summary.csv"], "must end with '.xlsx'"),
+    (["qc", "library", "fastqc", "--outdir", ""], "--outdir must be given a non-empty value"),
+    (["qc", "library", "fastqc", "--varscripts", "{unpaired}"], "tabulate_fastqc.py not found in --varscripts"),
+    (["qc", "library", "fastqc", "--module", "a b"], "--module 'a b' must be non-empty"),
+    (["qc", "library", "fastqc", "--fastqc-mem", "8X"], "is not a valid PBS memory value"),
+    (["qc", "library", "fastqc", "--tabulate-walltime", "49"], "exceeds the HPC limit of 48 hours"),
+    (["qc", "library", "fastqc", "--name", "a b"], "must start with a letter"),
 ]
 
 @pytest.mark.parametrize("args,message", VALIDATION_ERRORS, ids=lambda x: " ".join(x) if isinstance(x, list) else None)
@@ -325,6 +333,23 @@ def test_qc_library_trim_sizes_job(inputs, tmp_path):
               "--script", "s.sh"], tmp_path) # one sample needs no array
     text = open(tmp_path / "s.sh").read()
     assert "#PBS -J" not in text and "PAIRED=false #" in text and "CONDAENV=bbtools\n" in text
+
+def test_qc_library_fastqc_sizes_job(inputs, tmp_path):
+    result = run_psst(["qc", "library", "fastqc", "-d", inputs["reads"]], tmp_path)
+    assert "Found 2 paired sample(s) to check" in result.stdout
+    assert "#PBS -J 1-2\n" in open(tmp_path / "fastqc.sh").read()
+    text = open(tmp_path / "fastqc_tabulate.sh").read()
+    assert "#PBS -J" not in text and "TABLE=fastqc/fastqc_summary.xlsx\n" in text
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "fastqc_summary.xlsx").write_text("")
+    result = run_psst(["qc", "library", "fastqc", "--outdir", "out", "--name", "again"], tmp_path, check=False)
+    assert "already exists" in result.stderr # the derived table is checked too
+
+def test_qsub_chains_qc_fastqc_jobs(inputs, tmp_path, fake_qsub):
+    env, logFile = fake_qsub
+    run_psst(["qc", "library", "fastqc", "-d", inputs["reads"], "--qsub"], tmp_path, env=env)
+    calls = open(logFile).read().splitlines()
+    assert calls == [f"{tmp_path}/fastqc.sh", f"-W depend=afterok:101[].pbs {tmp_path}/fastqc_tabulate.sh"]
 
 def test_map_index_giraffe_derives_index(inputs, tmp_path):
     run_psst(["map", "index", "giraffe", "-g", inputs["gbz"]], tmp_path)

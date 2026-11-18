@@ -1,0 +1,21 @@
+#!/bin/bash
+# A stand-in for fastqc, which records its arguments (one call per line, separated by
+# '|') in $STUB_DIR/fastqc.log and writes an empty report (<file>_fastqc.html and .zip)
+# for each read file to --outdir. If $STUB_FAIL is set, it fails after writing them, as
+# an interrupted run would.
+set -e
+( IFS="|"; echo "$*" ) >> "${STUB_DIR}/fastqc.log"
+FILES=()
+while (( $# > 0 )); do
+    case $1 in
+        --outdir) OUTDIR=$2; shift 2 ;;
+        --threads) shift 2 ;;
+        *) FILES+=( "$1" ); shift ;;
+    esac
+done
+for f in "${FILES[@]}"; do
+    BASE=$(basename "${f}")
+    BASE=${BASE%.gz}; BASE=${BASE%.fq}; BASE=${BASE%.fastq}
+    touch "${OUTDIR}/${BASE}_fastqc.html" "${OUTDIR}/${BASE}_fastqc.zip"
+done
+[[ -z ${STUB_FAIL} ]]

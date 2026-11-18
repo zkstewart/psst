@@ -48,7 +48,7 @@ from modules.validation import \
         validate_pg_create, \
     validate_qc, \
         validate_qc_library, \
-            validate_qc_library_trim, \
+            validate_qc_library_trim, validate_qc_library_fastqc, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding, assembly_braker3
@@ -59,10 +59,10 @@ from modules.calling import call_variants, call_filter
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
 from modules.hic import hic_contacts
 from modules.pangenome import pangenome_create
-from modules.qc import qc_library_trim
+from modules.qc import qc_library_trim, qc_library_fastqc
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, GENSCRIPT_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, READQC_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, READQC_CONDA_ENV, FASTQC_MODULE, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, BRAKER_PROTEINS_FASTA, \
     REFERENCE_FASTA
 from _version import __version__
@@ -1763,6 +1763,42 @@ def main():
     add_pbs_arguments(qctrimparser, jobName="trim_reads",
                       walltime="06:00:00", mem="35G", cpus=4)
     
+    # QC > library > fastqc mode
+    qcfastqcparser = subQcLibraryParsers.add_parser("fastqc",
+                                                    parents=[p],
+                                                    add_help=False,
+                                                    help="""Check reads with FastQC (an array job with one subjob per
+                                                    sample), then summarise every sample's reports in an Excel table""")
+    qcfastqcparser.set_defaults(func=qc_library_fastqc)
+    add_reads_arguments(qcfastqcparser, allowSingleEnd=True)
+    qcfastqcparser.add_argument("--outdir", dest="outputDir",
+                                required=False,
+                                help="""Optionally, specify the output directory, relative to the
+                                directory the job is submitted from, where each sample's FastQC reports
+                                are written to <outdir>/<sample>/; default == '%(default)s'""",
+                                default="fastqc")
+    qcfastqcparser.add_argument("-o", "--output", dest="outputFile",
+                                required=False,
+                                help="""Optionally, specify the Excel (.xlsx) file to write the summary
+                                table to; default == '<outdir>/fastqc_summary.xlsx'""",
+                                default=None)
+    qcfastqcparser.add_argument("--module", dest="fastqcModule",
+                                required=False,
+                                help="""Optionally, specify the FastQC module to load;
+                                default == '%(default)s'""",
+                                default=FASTQC_MODULE)
+    add_varscripts_argument(qcfastqcparser)
+    qcfastqcparser.add_argument("--name", dest="jobName",
+                                required=False,
+                                help="""Optionally, specify the PBS job name, which also names the job
+                                scripts '<name>.sh' and '<name>_tabulate.sh'; default == '%(default)s'""",
+                                default="fastqc")
+    add_pbs_resource_arguments(qcfastqcparser, step="fastqc", title="PBS resources: FastQC (array job)",
+                               walltime="02:00:00", mem="25G", cpus=4)
+    add_pbs_resource_arguments(qcfastqcparser, step="tabulate", title="PBS resources: report tabulation",
+                               walltime="00:30:00", mem="4G", cpus=1)
+    add_pbs_submission_arguments(qcfastqcparser)
+    
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
@@ -1949,6 +1985,9 @@ def qcmain(args):
         if args.qcLibraryMode == "trim":
             print("## bbduk read trimming ##")
             validate_qc_library_trim(args)
+        if args.qcLibraryMode == "fastqc":
+            print("## FastQC read checking ##")
+            validate_qc_library_fastqc(args)
 
 if __name__ == "__main__":
     main()

@@ -1285,3 +1285,40 @@ def validate_qc_library_trim(args):
     # Give bbduk's Java heap most of --mem, since it otherwise sizes it from the whole node
     args.walltime = validate_pbs_resources(args.cpus, args.mem, args.walltime) # validates --mem early
     args.xmx = f"{max(1, int(parse_mem_gb(args.mem) * 1024 * 0.75))}m"
+
+def validate_qc_library_fastqc(args):
+    '''
+    Validation for arguments used in "qc library fastqc" mode. If a reads directory was
+    given, its samples are counted to determine the array job size.
+    '''
+    samples = validate_reads(args, args.singleEnd)
+    args.numSamples = None
+    if samples != None:
+        args.numSamples = len(samples)
+        print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to check")
+    validate_program_dir(args, "varScriptDir", os.path.join("QC", "reads", "tabulate_fastqc.py"), "--varscripts")
+    if re.match(r"^\S+$", args.fastqcModule) == None:
+        raise FormatError(f"--module '{args.fastqcModule}' must be non-empty and not contain whitespace")
+    
+    # Validate the output directory and table, which defaults to within the directory
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if args.outputFile == None:
+        args.outputFile = os.path.join(args.outputDir, "fastqc_summary.xlsx")
+    if not args.outputFile.endswith(".xlsx"):
+        raise ValueError(f"-o '{args.outputFile}' must end with '.xlsx'")
+    if os.path.exists(args.outputFile):
+        raise FileExistsError(f"Output table (-o {os.path.abspath(args.outputFile)}) already exists!")
+    
+    # Validate job names and resources
+    validate_job_name(args.jobName)
+    for step in ["fastqc", "tabulate"]:
+        walltime = validate_pbs_resources(getattr(args, f"{step}Cpus"), getattr(args, f"{step}Mem"),
+                                          getattr(args, f"{step}Walltime"), flagPrefix=f"{step}-")
+        setattr(args, f"{step}Walltime", walltime)
+    
+    # Validate job script locations
+    args.scriptFiles = {
+        "fastqc": validate_new_script(f"{args.jobName}.sh", "--name"),
+        "tabulate": validate_new_script(f"{args.jobName}_tabulate.sh", "--name")
+    }

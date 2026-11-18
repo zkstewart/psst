@@ -1,0 +1,3 @@
+#!/bin/bash
+# A stand-in for the environment modules command, so that job scripts' 'module load' succeeds
+exit 0

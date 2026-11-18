@@ -1,18 +1,22 @@
-# Integration tests of "qc library trim", running its job script with bbduk on simulated
-# reads which read through into adapters or end in low-quality bases, and checking the
-# trimmed reads against the simulation's truth. Requires bbduk.sh (BBTools) on PATH.
+# Integration tests of "qc library" modes on simulated reads, checking their outputs against
+# the simulation's truth: "trim" runs bbduk on reads which read through into adapters or end
+# in low-quality bases (requiring bbduk.sh on PATH), and "fastqc" runs FastQC then Various_scripts'
+# tabulate_fastqc.py (requiring fastqc on PATH, pandas and xlsxwriter, and Various_scripts at
+# $PSST_TEST_VARSCRIPTS, or else beside the psst repository).
 
-import gzip, os, random
+import gzip, os, random, shutil
 
 import pytest
 
 import sim
-from conftest import STUBS_DIR, require_tools, run_psst, run_array_job
+from conftest import STUBS_DIR, TESTS_DIR, require_tools, run_psst, run_job, run_array_job
 
 pytestmark = pytest.mark.integration
 
 SAMPLES = ["S1", "S2"]
 MINLEN = 25
+VARSCRIPTS = os.environ.get("PSST_TEST_VARSCRIPTS",
+                            os.path.join(os.path.dirname(os.path.dirname(TESTS_DIR)), "Various_scripts"))
 
 def read_fastq(fileName):
     with gzip.open(fileName, "rt") as fileIn:
@@ -71,3 +75,58 @@ def test_trim(trimmed, sample):
     kept = [ n for n in readThrough if len(truth[n][0]) >= MINLEN + 10 ]
     close = [ n for n in kept if n in reads1 and len(truth[n][0]) - len(reads1[n]) <= 5 ]
     assert len(close) >= 0.95 * len(kept)
+
+@pytest.fixture(scope="module")
+def fastqc_reports(tmp_path_factory):
+    '''
+    Simulates paired reads for a sample with adapter read-through and a clean sample (plus the
+    former's forward reads as a single-end sample), then checks and tabulates them with
+    "qc library fastqc", with the module command stubbed out.
+
+    Returns:
+        (base, numPairs) -- the work directory, and a dict of samples to their number of pairs.
+    '''
+    require_tools("fastqc")
+    pytest.importorskip("pandas")
+    pytest.importorskip("xlsxwriter")
+    if not os.path.isfile(os.path.join(VARSCRIPTS, "QC", "reads", "tabulate_fastqc.py")):
+        pytest.skip(f"requires Various_scripts at {VARSCRIPTS} (or set $PSST_TEST_VARSCRIPTS)")
+    base = tmp_path_factory.mktemp("fastqc")
+    rng = random.Random(5)
+    genome = { c: "".join(s) for c, s in sim.random_genome(rng, { "chr1": 40000 }).items() }
+    (base / "reads").mkdir()
+    (base / "single").mkdir()
+    sim.simulate_trimming_reads(rng, genome, str(base / "reads" / "adapters"), 1500)
+    sim.simulate_paired_reads(rng, [genome], str(base / "reads" / "clean"), coverage=5)
+    shutil.copy(base / "reads" / "adapters_1.fq.gz", base / "single" / "adapters.fq.gz")
+    numPairs = { s: len(read_fastq(base / "reads" / f"{s}_1.fq.gz")) for s in ["adapters", "clean"] }
+
+    binDir = base / "bin"
+    binDir.mkdir()
+    os.symlink(os.path.join(STUBS_DIR, "fastqc", "module"), binDir / "module")
+    env = dict(os.environ)
+    env["PATH"] = f"{binDir}{os.pathsep}{env['PATH']}"
+    for readsDir, extraArgs in [("reads", []), ("single", ["--singleEnd", "--outdir", "fastqc_se", "--name", "se"])]:
+        run_psst(["qc", "library", "fastqc", "-d", str(base / readsDir), "--varscripts", VARSCRIPTS,
+                  "--fastqc-cpus", "2", *extraArgs], base)
+        name = "se" if extraArgs else "fastqc"
+        run_array_job(str(base / f"{name}.sh"), str(base), env=env)
+        run_job(str(base / f"{name}_tabulate.sh"), str(base), env=env)
+    return base, numPairs
+
+def test_fastqc(fastqc_reports):
+    import pandas as pd
+    base, numPairs = fastqc_reports
+    tables = pd.read_excel(base / "fastqc" / "fastqc_summary.xlsx", sheet_name=None, index_col=0)
+    assert list(tables) == ["Forward Reads", "Reverse Reads"]
+    for table in tables.values():
+        assert sorted(table.index) == ["adapters", "clean"]
+        for sample, n in numPairs.items():
+            assert table.loc[sample, "total_reads"] == n
+            assert table.loc[sample, "approx_bp"] == n * 150
+        # A third of the adapters sample's pairs read through into adapters
+        assert table.loc["adapters", "adapter_content"] == "FAIL"
+        assert table.loc["clean", "adapter_content"] == "PASS"
+    single = pd.read_excel(base / "fastqc_se" / "fastqc_summary.xlsx", sheet_name=None, index_col=0)
+    assert list(single) == ["Forward Reads"] # single-end reads have no reverse reads
+    assert single["Forward Reads"].loc["adapters", "total_reads"] == numPairs["adapters"]

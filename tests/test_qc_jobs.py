@@ -1,6 +1,6 @@
-# Tests of the "qc library trim" job script's own logic (i.e., finding each subjob's
-# reads, naming outputs, skipping trimmed samples and never leaving partial output under
-# a final name), run against stub conda and bbduk.sh (see stubs/bbduk).
+# Tests of the "qc library" job scripts' own logic (i.e., finding each subjob's reads, naming
+# outputs, skipping finished samples and never leaving partial output under a final name),
+# run against stubs (see stubs/bbduk and stubs/fastqc, and a stand-in tabulate_fastqc.py).
 
 import os
 
@@ -110,3 +110,104 @@ def test_trim_refuses_outdir_as_readsdir(setup, tmp_path):
     assert result.returncode != 0
     assert "must differ from the reads directory" in result.stdout
     assert calls(stubDir) == []
+
+# A stand-in for Various_scripts' tabulate_fastqc.py, which records its arguments and
+# writes the table, failing if $STUB_FAIL is set
+TABULATE_STUB = """import os, sys
+open(os.path.join(os.environ["STUB_DIR"], "tabulate.log"), "a").write("|".join(sys.argv[1:]) + "\\n")
+open(sys.argv[sys.argv.index("-o") + 1], "w").write("table")
+sys.exit(1 if os.environ.get("STUB_FAIL") else 0)
+"""
+
+@pytest.fixture
+def fastqc_setup(setup, tmp_path):
+    '''
+    Extends setup with the fastqc stubs on PATH and a Various_scripts directory holding a
+    stand-in tabulate_fastqc.py.
+
+    Returns:
+        (workDir, env, stubDir, varScriptDir) -- as for setup, plus the Various_scripts
+            directory to give --varscripts.
+    '''
+    workDir, env, stubDir = setup
+    varScriptDir = tmp_path / "Various_scripts"
+    (varScriptDir / "QC" / "reads").mkdir(parents=True)
+    (varScriptDir / "QC" / "reads" / "tabulate_fastqc.py").write_text(TABULATE_STUB)
+    env = dict(env)
+    env["PATH"] = f"{os.path.join(STUBS_DIR, 'fastqc')}{os.pathsep}{env['PATH']}"
+    return workDir, env, stubDir, str(varScriptDir)
+
+def generate_fastqc(fastqc_setup, args):
+    workDir, _, _, varScriptDir = fastqc_setup
+    run_psst(["qc", "library", "fastqc", "--varscripts", varScriptDir, *args], workDir)
+    return os.path.join(workDir, "fastqc.sh"), os.path.join(workDir, "fastqc_tabulate.sh")
+
+def fastqc_calls(stubDir, tool="fastqc"):
+    logFile = os.path.join(stubDir, f"{tool}.log")
+    return [ line.split("|") for line in open(logFile).read().splitlines() ] if os.path.exists(logFile) else []
+
+def test_fastqc_then_tabulate(fastqc_setup, tmp_path):
+    workDir, env, stubDir, _ = fastqc_setup
+    fastqcScript, tabulateScript = generate_fastqc(fastqc_setup, ["-d", str(tmp_path / "paired"), "--fastqc-cpus", "2"])
+    run_array_job(fastqcScript, workDir, env=env)
+    outDir = os.path.join(workDir, "fastqc")
+    assert sorted(os.listdir(outDir)) == ["A", "B"]
+    assert sorted(os.listdir(os.path.join(outDir, "A"))) == ["A_R1_fastqc.html", "A_R1_fastqc.zip",
+                                                             "A_R2_fastqc.html", "A_R2_fastqc.zip"]
+    assert fastqc_calls(stubDir)[0] == ["--outdir", "fastqc/A.incomplete", "--threads", "2",
+                                        f"{tmp_path}/paired/A_R1.fq.gz", f"{tmp_path}/paired/A_R2.fq.gz"]
+    run_job(tabulateScript, workDir, env=env)
+    assert fastqc_calls(stubDir, "tabulate") == [["-i", "fastqc", "-o", "fastqc/fastqc_summary.incomplete.xlsx"]]
+    assert sorted(os.listdir(outDir)) == ["A", "B", "fastqc_summary.xlsx"]
+    result = run_job(tabulateScript, workDir, env=env, check=False) # refuses to overwrite the table
+    assert result.returncode != 0 and "already exists" in result.stdout
+
+def test_fastqc_single_end(fastqc_setup, tmp_path):
+    workDir, env, stubDir, _ = fastqc_setup
+    fastqcScript, tabulateScript = generate_fastqc(fastqc_setup, ["-d", str(tmp_path / "single"), "--singleEnd",
+                                                                  "-o", "summary.xlsx"])
+    run_array_job(fastqcScript, workDir, env=env)
+    assert sorted(os.listdir(os.path.join(workDir, "fastqc", "C"))) == ["C_fastqc.html", "C_fastqc.zip"]
+    run_job(tabulateScript, workDir, env=env)
+    assert os.path.exists(os.path.join(workDir, "summary.xlsx"))
+
+def test_fastqc_skips_checked_samples(fastqc_setup, tmp_path):
+    workDir, env, stubDir, _ = fastqc_setup
+    fastqcScript, _ = generate_fastqc(fastqc_setup, ["-d", str(tmp_path / "paired")])
+    run_job(fastqcScript, workDir, index=1, env=env)
+    result = run_job(fastqcScript, workDir, index=1, env=env)
+    assert "skipping A" in result.stdout
+    assert len(fastqc_calls(stubDir)) == 1
+
+def test_fastqc_failure_leaves_no_final_output(fastqc_setup, tmp_path):
+    workDir, env, stubDir, _ = fastqc_setup
+    fastqcScript, _ = generate_fastqc(fastqc_setup, ["-d", str(tmp_path / "paired")])
+    result = run_job(fastqcScript, workDir, index=1, env=dict(env, STUB_FAIL="1"), check=False)
+    assert result.returncode != 0
+    assert os.listdir(os.path.join(workDir, "fastqc")) == ["A.incomplete"]
+    run_job(fastqcScript, workDir, index=1, env=env) # a rerun replaces the incomplete output
+    assert os.listdir(os.path.join(workDir, "fastqc")) == ["A"]
+    assert len(os.listdir(os.path.join(workDir, "fastqc", "A"))) == 4
+
+@pytest.mark.parametrize("prepare,message", [
+    (lambda outDir: os.makedirs(os.path.join(outDir, "A")), "fastqc/B was not found"),
+    (lambda outDir: [ os.makedirs(os.path.join(outDir, d)) for d in ["A", "B", "C.incomplete"] ], "contains incomplete FastQC output"),
+])
+def test_tabulate_checks_reports(prepare, message, fastqc_setup, tmp_path):
+    workDir, env, stubDir, _ = fastqc_setup
+    _, tabulateScript = generate_fastqc(fastqc_setup, ["-d", str(tmp_path / "paired")])
+    prepare(os.path.join(workDir, "fastqc"))
+    result = run_job(tabulateScript, workDir, env=env, check=False)
+    assert result.returncode != 0
+    assert message in result.stdout
+    assert fastqc_calls(stubDir, "tabulate") == []
+
+def test_tabulate_failure_leaves_no_table(fastqc_setup, tmp_path):
+    workDir, env, stubDir, _ = fastqc_setup
+    fastqcScript, tabulateScript = generate_fastqc(fastqc_setup, ["-d", str(tmp_path / "paired")])
+    run_array_job(fastqcScript, workDir, env=env)
+    result = run_job(tabulateScript, workDir, env=dict(env, STUB_FAIL="1"), check=False)
+    assert result.returncode != 0
+    assert not os.path.exists(os.path.join(workDir, "fastqc", "fastqc_summary.xlsx"))
+    run_job(tabulateScript, workDir, env=env) # a rerun replaces the incomplete table
+    assert sorted(os.listdir(os.path.join(workDir, "fastqc"))) == ["A", "B", "fastqc_summary.xlsx"]
