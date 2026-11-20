@@ -3,7 +3,9 @@
 # in low-quality bases (requiring bbduk.sh on PATH), "fastqc" runs FastQC then annotarium's
 # 'qc fastqc tabulate' (requiring fastqc on PATH, and pandas, xlsxwriter and openpyxl), and
 # "kraken2" classifies reads from known taxa against a small database built here, then combines
-# and reformats the reports (requiring kraken2, KrakenTools and Krona on PATH, and pandas).
+# and reformats the reports (requiring kraken2, KrakenTools and Krona on PATH, and pandas), and
+# "smudgeplot" infers the ploidy of diploid and triploid samples with FastK and smudgeplot
+# (requiring FastK and smudgeplot on PATH).
 # annotarium is found at $PSST_TEST_ANNOTARIUM, and Various_scripts at $PSST_TEST_VARSCRIPTS,
 # or else beside the psst repository.
 
@@ -240,3 +242,58 @@ def test_kraken2(kraken2_results):
 def read_fastq_plain(fileName):
     with open(fileName) as fileIn:
         return fileIn.read().splitlines()[::4]
+
+SMUDGEPLOT_GENOME_SIZE = 250000
+SMUDGEPLOT_SAMPLES = { "D": 2, "T": 3 } # sample to ploidy
+
+@pytest.fixture(scope="module")
+def smudgeplot_results(tmp_path_factory):
+    '''
+    Simulates reads for a diploid and a triploid sample (haplotypes diverged by SNPs from one
+    genome, each sequenced at 15x), then infers their ploidy with "qc library smudgeplot",
+    estimating each sample's --L, with conda stubbed out.
+
+    Returns:
+        base -- the work directory.
+    '''
+    require_tools("FastK")
+    if shutil.which("smudgeplot") == None and shutil.which("smudgeplot.py") == None:
+        pytest.skip("requires smudgeplot on PATH")
+    base = tmp_path_factory.mktemp("smudgeplot")
+    rng = random.Random(5)
+    genome = sim.random_genome(rng, {"chr1": SMUDGEPLOT_GENOME_SIZE})
+    (base / "reads").mkdir()
+    for sample, ploidy in SMUDGEPLOT_SAMPLES.items():
+        haplotypes = [ sim.diverged_haplotype(rng, genome, 0.01) for _ in range(ploidy) ]
+        sim.simulate_paired_reads(rng, haplotypes, str(base / "reads" / sample), coverage=15)
+
+    binDir = base / "bin"
+    binDir.mkdir()
+    os.symlink(os.path.join(STUBS_DIR, "smudgeplot", "conda"), binDir / "conda")
+    env = dict(os.environ)
+    env["PATH"] = f"{binDir}{os.pathsep}{env['PATH']}"
+    run_psst(["qc", "library", "smudgeplot", "-d", str(base / "reads"), "-g", str(SMUDGEPLOT_GENOME_SIZE),
+              "--smudgeplot-cpus", "2", "--smudgeplot-mem", "4G"], base)
+    run_array_job(str(base / "smudgeplot.sh"), str(base), env=env)
+    run_job(str(base / "smudgeplot_tabulate.sh"), str(base), env=env)
+    return base
+
+def test_smudgeplot(smudgeplot_results):
+    base = smudgeplot_results
+    lines = [ line.split("\t") for line in open(base / "smudgeplot" / "ploidy_numbers.tsv").read().splitlines() ]
+    assert lines[0] == ["sample", "bases", "depth", "error_threshold", "smudge", "smudge_fraction", "ploidy"]
+    rows = { l[0]: l for l in lines[1:] }
+    assert list(rows) == list(SMUDGEPLOT_SAMPLES)
+    for sample, ploidy in SMUDGEPLOT_SAMPLES.items():
+        _, bases, depth, threshold, smudge, fraction, inferred = rows[sample]
+        # The reads are smaller than the bytes sampled, so their bases are counted exactly
+        truth = sum(len(seq) for r in [1, 2] for seq in read_fastq(base / "reads" / f"{sample}_{r}.fq.gz").values())
+        assert int(bases) == truth
+        assert float(depth) == round(truth / SMUDGEPLOT_GENOME_SIZE, 1)
+        # Half the k-mer depth per genome copy of a diploid (the default --ploidy), as 120 of each
+        # 150-bp read's positions start a 31-mer
+        assert int(threshold) == int(truth / SMUDGEPLOT_GENOME_SIZE * 120 / 150 / 2 / 2 + 0.5)
+        assert smudge == "A" * (ploidy - 1) + "B" and int(inferred) == ploidy and float(fraction) > 0.5
+        sampleDir = base / "smudgeplot" / sample
+        assert sorted(f for f in os.listdir(sampleDir) if "table" in f) == [f"{sample}_table.hist"] # the k-mer table is removed
+        assert any(f.startswith(f"{sample}_smudgeplot") for f in os.listdir(sampleDir))

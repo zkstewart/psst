@@ -1,0 +1,37 @@
+#!/bin/bash
+# A stand-in for smudgeplot, which records its arguments (one call per line, separated by
+# '|') in $STUB_DIR/smudgeplot.log. 'hetmers' writes <-o>.smu, and 'all' writes the
+# <-o>.smudge_report.tsv of smudgeplot >= 0.5, with the smudge sizes in $STUB_SMUDGES
+# (e.g., "AB=10 AAB=30"). If $STUB_OLD is set (by the v0.4 'smudgeplot.py'), they
+# instead write the <-o>_text.smu and <-o>_smudge_sizes.txt of earlier versions.
+( IFS="|"; echo "$*" ) >> "${STUB_DIR}/smudgeplot.log"
+TASK=$1
+shift
+while (( $# > 0 )); do
+    case $1 in
+        -o) OUT=$2; shift 2 ;;
+        *) shift ;;
+    esac
+done
+if [[ ${TASK} == "hetmers" ]]; then
+    if [[ -n ${STUB_OLD} ]]; then touch "${OUT}_text.smu"; else touch "${OUT}.smu"; fi
+elif [[ ${TASK} == "all" ]]; then
+    if [[ -n ${STUB_OLD} ]]; then
+        for smudge in ${STUB_SMUDGES}; do
+            printf "%s\t%s\n" "${smudge%=*}" "${smudge#*=}"
+        done > "${OUT}_smudge_sizes.txt"
+    else
+        NAMES="dataset\ttotal_kmers\ttotal_error_kmers\tAB\tAAB\tAAAB\tAABB\t4A1B\t3A2B"
+        echo -e "${NAMES}" > "${OUT}.smudge_report.tsv"
+        echo -e "${NAMES}" | tr '\t' '\n' | tail -n +4 | while read NAME; do
+            SIZE=0.0
+            for smudge in ${STUB_SMUDGES}; do
+                if [[ ${smudge%=*} == ${NAME} ]]; then SIZE=${smudge#*=}; fi
+            done
+            printf "\t%s" "${SIZE}"
+        done | sed 's/^/x.smu\t100\t5/' >> "${OUT}.smudge_report.tsv"
+        echo >> "${OUT}.smudge_report.tsv"
+    fi
+    touch "${OUT}_smudgeplot.png"
+fi
+echo "Done!" >&2 # smudgeplot reports this even on failure

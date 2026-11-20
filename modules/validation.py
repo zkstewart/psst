@@ -1377,3 +1377,68 @@ def validate_qc_library_kraken2(args):
         "classify": validate_new_script(f"{args.jobName}.sh", "--name"),
         "tabulate": validate_new_script(f"{args.jobName}_tabulate.sh", "--name")
     }
+
+def parse_genome_size(genomeSize):
+    '''
+    Parameters:
+        genomeSize -- a string of a genome size in bp, optionally with a k, M or G suffix
+                      (e.g., '350M' or '1.2G').
+    Returns:
+        bp -- an int of the genome size in bp.
+    '''
+    match = re.match(r"^(\d+(?:\.\d+)?)([kmg]?)b?p?$", genomeSize, re.IGNORECASE)
+    if match == None:
+        raise FormatError(f"--genome-size '{genomeSize}' must be a number of bp, optionally with a " +
+                          "k, M or G suffix (e.g., 350M or 1.2G)")
+    bp = int(float(match.group(1)) * {"": 1, "k": 1e3, "m": 1e6, "g": 1e9}[match.group(2).lower()])
+    if bp < 1:
+        raise ValueError(f"--genome-size '{genomeSize}' must be at least 1 bp")
+    return bp
+
+def validate_qc_library_smudgeplot(args):
+    '''
+    Validation for arguments used in "qc library smudgeplot" mode. If a reads directory was
+    given, its samples are counted to determine the array job size. Sets args.fastkMem, the
+    memory for FastK's sorting, from --smudgeplot-mem.
+    '''
+    samples = validate_reads(args, args.singleEnd)
+    args.numSamples = None
+    if samples != None:
+        args.numSamples = len(samples)
+        print(f"Found {args.numSamples} {'single-end' if args.singleEnd else 'paired'} sample(s) to analyse")
+    if re.match(r"^\S+$", args.condaEnv) == None:
+        raise FormatError(f"--conda '{args.condaEnv}' must be non-empty and not contain whitespace")
+    
+    # Validate the error threshold, or the values it is estimated from
+    if args.errorThreshold != None:
+        if args.errorThreshold < 1:
+            raise ValueError("--L must be >= 1")
+        if args.genomeSize != None:
+            print("WARNING: --genome-size is ignored since --L was given")
+        args.genomeSize = "" # unused by the job
+    elif args.genomeSize != None:
+        args.genomeSize = parse_genome_size(args.genomeSize)
+    if args.ploidy < 1:
+        raise ValueError("--ploidy must be >= 1")
+    
+    # Validate the output directory and table, which defaults to within the directory
+    if args.outputDir == "":
+        raise ValueError("--outdir must be given a non-empty value")
+    if args.outputFile == None:
+        args.outputFile = os.path.join(args.outputDir, "ploidy_numbers.tsv")
+    if os.path.exists(args.outputFile):
+        raise FileExistsError(f"Output table (-o {os.path.abspath(args.outputFile)}) already exists!")
+    
+    # Validate job names and resources, giving FastK's sorting most of the memory
+    validate_job_name(args.jobName)
+    for step in ["smudgeplot", "tabulate"]:
+        walltime = validate_pbs_resources(getattr(args, f"{step}Cpus"), getattr(args, f"{step}Mem"),
+                                          getattr(args, f"{step}Walltime"), flagPrefix=f"{step}-")
+        setattr(args, f"{step}Walltime", walltime)
+    args.fastkMem = max(1, int(parse_mem_gb(args.smudgeplotMem) * 0.75))
+    
+    # Validate job script locations
+    args.scriptFiles = {
+        "smudgeplot": validate_new_script(f"{args.jobName}.sh", "--name"),
+        "tabulate": validate_new_script(f"{args.jobName}_tabulate.sh", "--name")
+    }

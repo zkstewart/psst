@@ -104,3 +104,38 @@ def qc_library_kraken2(args):
             "prefix": args.prefix
         }, None)
     ])
+
+def qc_library_smudgeplot(args):
+    '''
+    Generates (and optionally submits) the two PBS job scripts of "qc library smudgeplot":
+        <name>.sh -- an array job counting each sample's k-mers with FastK, then inferring
+                     its ploidy with smudgeplot, writing results to <outdir>/<sample>/
+        <name>_tabulate.sh -- combines every sample's most likely ploidy into one table
+
+    With --qsub, the tabulation job is submitted to run after every smudgeplot subjob succeeds.
+
+    Parameters:
+        args -- an argparse.Namespace containing validated "qc library smudgeplot" arguments.
+    '''
+    reads = {
+        "readsDir": args.readsDir,
+        "readsSuffix": args.readsSuffix,
+        "paired": "false" if args.singleEnd else "true",
+        "outputDir": args.outputDir
+    }
+    finalise_chained_jobs(args, [ # step, template, template values, array size
+        ("smudgeplot", "qc/run_smudgeplot.sh", {
+            **reads,
+            "condaEnv": args.condaEnv,
+            "errorThreshold": "" if args.errorThreshold == None else args.errorThreshold,
+            "genomeSize": args.genomeSize,
+            "ploidy": args.ploidy,
+            "keepTable": "true" if args.keepTables else "false",
+            "cpus": args.smudgeplotCpus,
+            "fastkMem": args.fastkMem
+        }, get_array_size(args.numSamples)),
+        ("tabulate", "qc/run_tabulate_smudgeplot.sh", {
+            **reads,
+            "outputFile": args.outputFile
+        }, None)
+    ])

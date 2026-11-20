@@ -48,7 +48,7 @@ from modules.validation import \
         validate_pg_create, \
     validate_qc, \
         validate_qc_library, \
-            validate_qc_library_trim, validate_qc_library_fastqc, validate_qc_library_kraken2, \
+            validate_qc_library_trim, validate_qc_library_fastqc, validate_qc_library_kraken2, validate_qc_library_smudgeplot, \
     validate_pbs_submission, validate_pbs_job, RPID_SHORTCUTS
 from modules.annotable import annotable_generate
 from modules.assembly import assembly_hifiasm, assembly_revcomp, assembly_scaffolding, assembly_braker3
@@ -59,10 +59,10 @@ from modules.calling import call_variants, call_filter
 from modules.clustering import clustering_mmseqs2, clustering_cdhit
 from modules.hic import hic_contacts
 from modules.pangenome import pangenome_create
-from modules.qc import qc_library_trim, qc_library_fastqc, qc_library_kraken2
+from modules.qc import qc_library_trim, qc_library_fastqc, qc_library_kraken2, qc_library_smudgeplot
 from modules.mapping import map_short, map_giraffe, map_index_giraffe, map_index_bwa, map_index_salmon, map_index_star, map_rna_salmon, map_rna_star, map_nanopore
 from modules.locations import MMSEQS_DIR, VARSCRIPT_DIR, ANNOTARIUM_DIR, COMPLEASM_DIR, DORADO_DIR, BASESPACE_DIR, CDHIT_DIR, PAF2DOTPLOT_DIR, \
-    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, READQC_CONDA_ENV, FASTQC_MODULE, KRAKEN2_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
+    THREEDDNA_DIR, PAIRTOOLS_CONDA_ENV, CACTUS_CONDA_ENV, READQC_CONDA_ENV, FASTQC_MODULE, KRAKEN2_CONDA_ENV, SMUDGEPLOT_CONDA_ENV, SALMON_DIR, STAR_MODULE, MINIMAP2_DIR, CHOPPER_DIR, VG_DIR, BRAKER3_SIF, \
     REFSEQ_PLANT_FASTA, UNIREF90_FASTA, IDMAPPING_FILE, OBO_FILE, BRAKER_PROTEINS_FASTA, KRAKEN2_DB, \
     REFERENCE_FASTA
 from _version import __version__
@@ -1837,6 +1837,72 @@ def main():
                                walltime="00:10:00", mem="10G", cpus=1)
     add_pbs_submission_arguments(qckrakenparser)
     
+    # QC > library > smudgeplot mode
+    qcsmudgeparser = subQcLibraryParsers.add_parser("smudgeplot",
+                                                    parents=[p],
+                                                    add_help=False,
+                                                    help="""Infer each sample's ploidy from k-mer pairs with FastK and smudgeplot
+                                                    (an array job with one subjob per sample), then tabulate every sample's
+                                                    most likely ploidy""")
+    qcsmudgeparser.set_defaults(func=qc_library_smudgeplot)
+    add_reads_arguments(qcsmudgeparser, allowSingleEnd=True)
+    qcsmudgeparser.add_argument("--outdir", dest="outputDir",
+                                required=False,
+                                help="""Optionally, specify the output directory, relative to the
+                                directory the job is submitted from, where each sample's results are
+                                written to <outdir>/<sample>/; default == '%(default)s'""",
+                                default="smudgeplot")
+    qcsmudgeparser.add_argument("-o", "--output", dest="outputFile",
+                                required=False,
+                                help="""Optionally, specify the file to write the table of every sample's
+                                most likely ploidy to; default == '<outdir>/ploidy_numbers.tsv'""",
+                                default=None)
+    qcsmudgeparser.add_argument("-g", "--genome-size", dest="genomeSize",
+                                required=False,
+                                help="""Optionally, specify the approximate haploid genome size in bp,
+                                optionally with a k, M or G suffix (e.g., 350M or 1.2G), from which each
+                                sample's sequencing depth, and so its --L, is estimated; ignored if --L
+                                is given; default == left as a placeholder""",
+                                default=None)
+    qcsmudgeparser.add_argument("--ploidy", dest="ploidy",
+                                required=False,
+                                type=int,
+                                help="""Optionally, specify the highest ploidy expected, which divides the
+                                sequencing depth between genome copies when estimating --L; over-estimating
+                                it only lowers --L; default == %(default)s""",
+                                default=2)
+    qcsmudgeparser.add_argument("--L", dest="errorThreshold",
+                                required=False,
+                                type=int,
+                                help="""Optionally, specify the count below which k-mers are considered
+                                erroneous (smudgeplot hetmers -L) for every sample; default == estimated
+                                for each sample as half its k-mer coverage per genome copy, from its
+                                bases sequenced (estimated from the read files' sizes and their first
+                                reads), --genome-size and --ploidy""",
+                                default=None)
+    qcsmudgeparser.add_argument("--keep-tables", dest="keepTables",
+                                required=False,
+                                action="store_true",
+                                help="""Optionally, keep each sample's FastK k-mer table, which is needed
+                                to rerun smudgeplot hetmers with another --L but can be large; each sample's
+                                k-mer histogram is always kept""",
+                                default=False)
+    qcsmudgeparser.add_argument("--conda", dest="condaEnv",
+                                required=False,
+                                help="""Optionally, specify the conda environment containing smudgeplot
+                                and FastK; default == '%(default)s'""",
+                                default=SMUDGEPLOT_CONDA_ENV)
+    qcsmudgeparser.add_argument("--name", dest="jobName",
+                                required=False,
+                                help="""Optionally, specify the PBS job name, which also names the job
+                                scripts '<name>.sh' and '<name>_tabulate.sh'; default == '%(default)s'""",
+                                default="smudgeplot")
+    add_pbs_resource_arguments(qcsmudgeparser, step="smudgeplot", title="PBS resources: FastK and smudgeplot (array job)",
+                               walltime="00:30:00", mem="30G", cpus=8)
+    add_pbs_resource_arguments(qcsmudgeparser, step="tabulate", title="PBS resources: ploidy tabulation",
+                               walltime="00:10:00", mem="1G", cpus=1)
+    add_pbs_submission_arguments(qcsmudgeparser)
+    
     check_reserved_dests(subParentParser)
     args = subParentParser.parse_args()
     if not hasattr(args, "userSet"): # only set by UserSet actions when they are used
@@ -2029,6 +2095,9 @@ def qcmain(args):
         if args.qcLibraryMode == "kraken2":
             print("## kraken2 read classification ##")
             validate_qc_library_kraken2(args)
+        if args.qcLibraryMode == "smudgeplot":
+            print("## FastK and smudgeplot ploidy inference ##")
+            validate_qc_library_smudgeplot(args)
 
 if __name__ == "__main__":
     main()

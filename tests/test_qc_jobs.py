@@ -1,8 +1,9 @@
 # Tests of the "qc library" job scripts' own logic (i.e., finding each subjob's reads, naming
 # outputs, skipping finished samples and never leaving partial output under a final name),
-# run against stubs (see stubs/bbduk, stubs/fastqc and stubs/kraken2, and stand-in Various_scripts).
+# run against stubs (see stubs/bbduk, stubs/fastqc, stubs/kraken2 and stubs/smudgeplot, and stand-in
+# Various_scripts).
 
-import os
+import gzip, os
 
 import pytest
 
@@ -324,3 +325,118 @@ def test_kraken2_tabulate_failure_leaves_no_tables(kraken2_setup, tmp_path):
     assert sorted(f for f in os.listdir(os.path.join(workDir, "kraken2")) if not f.endswith("incomplete.tsv")) == ["A", "B"]
     run_job(tabulateScript, workDir, env=env) # a rerun replaces the incomplete tables
     assert sorted(os.listdir(os.path.join(workDir, "kraken2"))) == ["A", "B", "kraken_summary.reformat.tsv", "kraken_summary.tsv"]
+
+@pytest.fixture
+def smudgeplot_setup(setup, tmp_path):
+    '''
+    Extends setup with the FastK and smudgeplot stubs on PATH, and FASTQ reads: paired
+    samples A and B of 50 100-bp reads per file, gzipped.
+
+    Returns:
+        (workDir, env, stubDir, readsDir) -- as for setup, plus the reads directory.
+    '''
+    workDir, env, stubDir = setup
+    readsDir = tmp_path / "fastq"
+    readsDir.mkdir()
+    for name in ["A_1.fq.gz", "A_2.fq.gz", "B_1.fq.gz", "B_2.fq.gz"]:
+        with gzip.open(readsDir / name, "wt") as fileOut:
+            fileOut.write("".join(f"@r{i}\n{'A' * 100}\n+\n{'I' * 100}\n" for i in range(50)))
+    env = dict(env)
+    stubs = os.path.join(STUBS_DIR, "smudgeplot")
+    env["PATH"] = os.pathsep.join([stubs, os.path.join(stubs, "v0.5"), env["PATH"]])
+    env["STUB_SMUDGES"] = "AB=10 AAB=30 4A1B=5"
+    return workDir, env, stubDir, str(readsDir)
+
+def generate_smudgeplot(smudgeplot_setup, args):
+    workDir = smudgeplot_setup[0]
+    run_psst(["qc", "library", "smudgeplot", *args], workDir)
+    return os.path.join(workDir, "smudgeplot.sh"), os.path.join(workDir, "smudgeplot_tabulate.sh")
+
+def read_tsv(fileName):
+    return [ line.split("\t") for line in open(fileName).read().splitlines() ]
+
+PLOIDY_HEADER = ["sample", "bases", "depth", "error_threshold", "smudge", "smudge_fraction", "ploidy"]
+
+def test_smudgeplot_then_tabulate(smudgeplot_setup, tmp_path):
+    workDir, env, stubDir, readsDir = smudgeplot_setup
+    script, tabulateScript = generate_smudgeplot(smudgeplot_setup, ["-d", readsDir, "-g", "100", "--smudgeplot-cpus", "2",
+                                                                    "--smudgeplot-mem", "8G"])
+    result = run_array_job(script, workDir, env=env)
+    # 10,000 bases give a depth of 100 and k-mer depth of 70 (as 70 of each read's 100 positions
+    # start a 31-mer), which is 35 per genome copy, half of which is 17.5
+    assert stub_calls(stubDir, "FastK")[0] == [
+        "-t4", "-k31", "-M6", "-T2", f"{readsDir}/A_1.fq.gz", f"{readsDir}/A_2.fq.gz",
+        "-Nsmudgeplot/A.incomplete/A_table", "-Psmudgeplot/A.incomplete/tmp"]
+    assert stub_calls(stubDir, "smudgeplot")[:2] == [
+        ["hetmers", "-L", "18", "-t", "2", "-o", "smudgeplot/A.incomplete/A_kmerpairs", "-tmp", "smudgeplot/A.incomplete/tmp",
+         "smudgeplot/A.incomplete/A_table.ktab"],
+        ["all", "-t", "A", "-o", "smudgeplot/A.incomplete/A", "smudgeplot/A.incomplete/A_kmerpairs.smu"]]
+    outDir = os.path.join(workDir, "smudgeplot")
+    assert sorted(os.listdir(outDir)) == ["A", "B"]
+    assert sorted(os.listdir(os.path.join(outDir, "A"))) == [ # the k-mer table is removed
+        "A.ploidy.tsv", "A.smudge_report.tsv", "A_kmerpairs.smu", "A_smudgeplot.png", "A_table.hist"]
+    assert read_tsv(os.path.join(outDir, "A", "A.ploidy.tsv")) == [
+        PLOIDY_HEADER, ["A", "10000", "100.0", "18", "AAB", "0.6667", "3"]]
+    run_job(tabulateScript, workDir, env=env)
+    assert read_tsv(os.path.join(outDir, "ploidy_numbers.tsv")) == [
+        PLOIDY_HEADER, ["A", "10000", "100.0", "18", "AAB", "0.6667", "3"], ["B", "10000", "100.0", "18", "AAB", "0.6667", "3"]]
+    result = run_job(tabulateScript, workDir, env=env, check=False) # refuses to overwrite the table
+    assert result.returncode != 0 and "already exists" in result.stdout
+
+def test_smudgeplot_estimates_large_files(smudgeplot_setup, tmp_path):
+    workDir, env, stubDir, _ = smudgeplot_setup
+    readsDir = tmp_path / "large"
+    readsDir.mkdir()
+    with open(readsDir / "C.fq", "w") as fileOut: # ~25 MB, so the bases are scaled from the first 10 MB
+        fileOut.write("".join("@r\n" + "A" * 100 + "\n+\n" + "I" * 100 + "\n" for _ in range(120000)))
+    script, _ = generate_smudgeplot(smudgeplot_setup, ["-d", str(readsDir), "--singleEnd", "-rs", ".fq", "-g", "100k",
+                                                       "--ploidy", "3", "--keep-tables"])
+    result = run_job(script, workDir, env=env)
+    sample = read_tsv(os.path.join(workDir, "smudgeplot", "C", "C.ploidy.tsv"))[1]
+    assert abs(int(sample[1]) - 12000000) < 12000 # within 0.1% of the 12 Mb sequenced
+    # A depth of 120 gives a k-mer depth of 84, which is 28 per genome copy at ploidy 3, half of which is 14
+    assert sample[2:] == ["120.0", "14", "AAB", "0.6667", "3"]
+    assert "using -L 14" in result.stdout
+    assert sorted(f for f in os.listdir(os.path.join(workDir, "smudgeplot", "C")) if "table" in f) == [
+        ".C_table.ktab.1", "C_table.hist", "C_table.ktab"] # --keep-tables keeps the k-mer table
+
+def test_smudgeplot_given_threshold_and_ploidy_names(smudgeplot_setup, tmp_path):
+    workDir, env, stubDir, readsDir = smudgeplot_setup
+    script, _ = generate_smudgeplot(smudgeplot_setup, ["-d", readsDir, "--L", "7"])
+    os.makedirs(os.path.join(workDir, "smudgeplot", "A"))
+    assert "skipping A" in run_job(script, workDir, index=1, env=env).stdout
+    run_job(script, workDir, index=2, env=dict(env, STUB_SMUDGES="AB=1 AAB=1 4A1B=3")) # 4A1B is 5 copies
+    assert stub_calls(stubDir, "smudgeplot")[0][:3] == ["hetmers", "-L", "7"]
+    assert read_tsv(os.path.join(workDir, "smudgeplot", "B", "B.ploidy.tsv"))[1] == ["B", ".", ".", "7", "4A1B", "0.6000", "5"]
+    assert len(stub_calls(stubDir, "FastK")) == 1 # A was skipped
+
+def test_smudgeplot_earlier_versions(smudgeplot_setup, tmp_path):
+    workDir, env, stubDir, readsDir = smudgeplot_setup
+    stubs = os.path.join(STUBS_DIR, "smudgeplot")
+    path = [ d for d in env["PATH"].split(os.pathsep) if not os.path.exists(os.path.join(d, "smudgeplot")) ]
+    env = dict(env, PATH=os.pathsep.join([stubs, os.path.join(stubs, "v0.4"), *path]))
+    script, _ = generate_smudgeplot(smudgeplot_setup, ["-d", readsDir, "--L", "7"])
+    run_job(script, workDir, index=1, env=dict(env, STUB_SMUDGES="AB=0.2 AABB=0.7 AAB=0.1"))
+    assert stub_calls(stubDir, "smudgeplot")[1][-1] == "smudgeplot/A.incomplete/A_kmerpairs_text.smu"
+    assert read_tsv(os.path.join(workDir, "smudgeplot", "A", "A.ploidy.tsv"))[1] == ["A", ".", ".", "7", "AABB", "0.7000", "4"]
+    run_job(script, workDir, index=2, env=dict(env, STUB_SMUDGES="")) # no smudges were found
+    assert read_tsv(os.path.join(workDir, "smudgeplot", "B", "B.ploidy.tsv"))[1] == ["B", ".", ".", "7", ".", ".", "undetermined"]
+
+def test_smudgeplot_failure_leaves_no_final_output(smudgeplot_setup, tmp_path):
+    workDir, env, stubDir, readsDir = smudgeplot_setup
+    script, _ = generate_smudgeplot(smudgeplot_setup, ["-d", readsDir, "-g", "100"])
+    result = run_job(script, workDir, index=1, env=dict(env, STUB_FAIL="1"), check=False)
+    assert result.returncode != 0
+    assert os.listdir(os.path.join(workDir, "smudgeplot")) == ["A.incomplete"]
+    assert stub_calls(stubDir, "smudgeplot") == [] # nothing runs after a failed k-mer count
+    run_job(script, workDir, index=1, env=env) # a rerun replaces the incomplete output
+    assert os.listdir(os.path.join(workDir, "smudgeplot")) == ["A"]
+
+def test_smudgeplot_tabulate_checks_summaries(smudgeplot_setup, tmp_path):
+    workDir, env, stubDir, readsDir = smudgeplot_setup
+    script, tabulateScript = generate_smudgeplot(smudgeplot_setup, ["-d", readsDir, "-g", "100", "-o", "ploidy.tsv"])
+    run_job(script, workDir, index=1, env=env) # as if only sample A were analysed
+    result = run_job(tabulateScript, workDir, env=env, check=False)
+    assert result.returncode != 0
+    assert "smudgeplot/B/B.ploidy.tsv was not found" in result.stdout
+    assert not os.path.exists(os.path.join(workDir, "ploidy.tsv"))

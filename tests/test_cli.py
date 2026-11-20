@@ -246,6 +246,15 @@ VALIDATION_ERRORS = [
     (["qc", "library", "kraken2", "--outdir", ""], "--outdir must be given a non-empty value"),
     (["qc", "library", "kraken2", "--classify-cpus", "0"], "--classify-cpus must be >= 1"),
     (["qc", "library", "kraken2", "--tabulate-mem", "8X"], "is not a valid PBS memory value"),
+    (["qc", "library", "smudgeplot", "-d", "{unpaired}"], "has no matching reverse read file"),
+    (["qc", "library", "smudgeplot", "-g", "1.2X"], "--genome-size '1.2X' must be a number of bp"),
+    (["qc", "library", "smudgeplot", "-g", "0"], "--genome-size '0' must be at least 1 bp"),
+    (["qc", "library", "smudgeplot", "--L", "0"], "--L must be >= 1"),
+    (["qc", "library", "smudgeplot", "--ploidy", "0"], "--ploidy must be >= 1"),
+    (["qc", "library", "smudgeplot", "--conda", "a b"], "--conda 'a b' must be non-empty"),
+    (["qc", "library", "smudgeplot", "--outdir", ""], "--outdir must be given a non-empty value"),
+    (["qc", "library", "smudgeplot", "--smudgeplot-mem", "8X"], "is not a valid PBS memory value"),
+    (["qc", "library", "smudgeplot", "--tabulate-cpus", "0"], "--tabulate-cpus must be >= 1"),
 ]
 
 @pytest.mark.parametrize("args,message", VALIDATION_ERRORS, ids=lambda x: " ".join(x) if isinstance(x, list) else None)
@@ -266,6 +275,7 @@ VALIDATION_WARNINGS = [
     (["call", "giraffe", "-i", "{giraffe}", "-b", "{bams}"], "sample(s) s1 are also samples in"),
     (["qc", "library", "kraken2", "--db", "{k2db}", "--classify-mem", "1M"], "is less than the size of the kraken2 database"),
     (["qc", "library", "kraken2", "-d", "{reads}", "--classify-walltime", "0:15"], "may be too short to classify 2 sample(s)"),
+    (["qc", "library", "smudgeplot", "-g", "1G", "--L", "8"], "--genome-size is ignored since --L was given"),
 ]
 
 @pytest.mark.parametrize("args,message", VALIDATION_WARNINGS, ids=lambda x: " ".join(x) if isinstance(x, list) else None)
@@ -369,6 +379,23 @@ def test_qc_library_kraken2_sizes_job(inputs, tmp_path):
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "x.reformat.tsv").write_text("")
     result = run_psst(["qc", "library", "kraken2", "--outdir", "out", "-p", "x", "--name", "again"], tmp_path, check=False)
+    assert "already exists" in result.stderr
+
+def test_qc_library_smudgeplot_sizes_job(inputs, tmp_path):
+    result = run_psst(["qc", "library", "smudgeplot", "-d", inputs["reads"], "-g", "1.5M", "--smudgeplot-mem", "10G"], tmp_path)
+    assert "Found 2 paired sample(s) to analyse" in result.stdout
+    text = open(tmp_path / "smudgeplot.sh").read()
+    assert "#PBS -J 1-2\n" in text and "#PBS -l mem=10G\n" in text
+    assert "ERRORTHRESHOLD=''\n" in text and "GENOMESIZE=1500000\n" in text and "FASTKMEM=7 #" in text
+    assert "TABLE=smudgeplot/ploidy_numbers.tsv\n" in open(tmp_path / "smudgeplot_tabulate.sh").read()
+    run_psst(["qc", "library", "smudgeplot", "--L", "12", "--keep-tables", "--name", "fixed"], tmp_path)
+    text = open(tmp_path / "fixed.sh").read()
+    assert "ERRORTHRESHOLD=12\n" in text and "GENOMESIZE=''\n" in text and "KEEPTABLE=true #" in text
+    run_psst(["qc", "library", "smudgeplot", "--name", "unsized"], tmp_path)
+    assert "GENOMESIZE=@@genomeSize@@\n" in open(tmp_path / "unsized.sh").read()
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "ploidy_numbers.tsv").write_text("")
+    result = run_psst(["qc", "library", "smudgeplot", "--outdir", "out", "--name", "again"], tmp_path, check=False)
     assert "already exists" in result.stderr
 
 def test_qsub_chains_qc_kraken2_jobs(inputs, tmp_path, fake_qsub):

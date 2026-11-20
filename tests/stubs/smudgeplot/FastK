@@ -1,0 +1,14 @@
+#!/bin/bash
+# A stand-in for FastK, which records its arguments (one call per line, separated by '|')
+# in $STUB_DIR/FastK.log and writes the k-mer histogram and table (with a hidden table
+# part, as FastK does) named by -N. If $STUB_FAIL is set, it fails after writing them, as
+# an interrupted run would.
+set -e
+( IFS="|"; echo "$*" ) >> "${STUB_DIR}/FastK.log"
+for arg in "$@"; do
+    if [[ ${arg} == -N* ]]; then
+        ROOT=${arg#-N}
+        touch "${ROOT}.hist" "${ROOT}.ktab" "$(dirname "${ROOT}")/.$(basename "${ROOT}").ktab.1"
+    fi
+done
+[[ -z ${STUB_FAIL} ]]
